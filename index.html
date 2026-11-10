@@ -1895,5 +1895,86 @@ requestAnimationFrame(animate);
 window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, get state(){ return state; }, get root(){ return root; }, get stats(){ return lastStats; } };
 </script>
 <script>if('serviceWorker' in navigator) addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
+<!-- ===== Wheel picker: tap a value box → a drum of numbers; swipe up/down, the value applies as soon as it stops ===== -->
+<style>
+  .cell select{ pointer-events:none; }
+  .cell{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  #whl{ position:fixed; inset:0; z-index:500; display:none; }
+  #whl.on{ display:block; }
+  #whl .bk{ position:absolute; inset:0; background:#0006; }
+  #whl .pn{ position:absolute; left:0; right:0; bottom:0; margin:0 auto; max-width:420px; background:#050f08; border:1px solid #a3e63599;
+            border-bottom:none; border-radius:18px 18px 0 0; box-shadow:0 -6px 24px #000a, 0 0 16px #a3e63533; padding:10px 14px 18px;
+            transform:translateY(100%); transition:transform .22s ease; }
+  #whl.on .pn{ transform:none; }
+  #whl .hd{ display:flex; justify-content:space-between; align-items:center; direction:rtl; padding:0 2px 8px; }
+  #whl .tt{ color:#a3e635; font-weight:800; font-size:15px; }
+  #whl .tt .en{ direction:ltr; unicode-bidi:isolate; font-family:Consolas, monospace; color:#bef264; margin-inline-start:6px; }
+  #whl .ok{ background:#a3e635; color:#0b1a0f; border:none; border-radius:9px; padding:7px 18px; font-weight:800; font-size:15px; cursor:pointer; }
+  #whl .wr{ position:relative; height:230px; perspective:600px; }
+  #whl .band{ position:absolute; left:8%; right:8%; top:93px; height:44px; border-radius:10px; border:1px solid #a3e635;
+              background:#a3e6351a; box-shadow:0 0 12px #a3e63544 inset; pointer-events:none; }
+  #whl .ls{ height:100%; overflow-y:scroll; scroll-snap-type:y mandatory; scrollbar-width:none; overscroll-behavior:contain;
+            -webkit-mask-image:linear-gradient(transparent, #000 30%, #000 70%, transparent); mask-image:linear-gradient(transparent, #000 30%, #000 70%, transparent); }
+  #whl .ls::-webkit-scrollbar{ display:none; }
+  #whl .it{ height:44px; line-height:44px; text-align:center; scroll-snap-align:center; font-family:Consolas, monospace; font-size:22px;
+            font-weight:700; color:#d9f99d; direction:ltr; user-select:none; transform-style:preserve-3d; }
+  #whl .it.on{ color:#a3e635; font-size:25px; }
+  #whl .sp{ height:93px; }
+</style>
+<div id="whl"><div class="bk"></div><div class="pn">
+  <div class="hd"><span class="tt" id="whlT"></span><button class="ok" id="whlOk">✓ تم</button></div>
+  <div class="wr"><div class="band"></div><div class="ls" id="whlL"></div></div>
+</div></div>
+<script>
+(() => {
+  const W = document.getElementById('whl'), L = document.getElementById('whlL'), T = document.getElementById('whlT'), H = 44;
+  let sel = null, items = [], cur = -1, armed = false, timer = 0, raf = 0;
+  const idxNow = () => Math.max(0, Math.min(items.length - 1, Math.round(L.scrollTop / H)));
+  function paint(){
+    raf = 0; const c = L.scrollTop / H, k = idxNow();
+    items.forEach((el, i) => {
+      const d = i - c, a = Math.abs(d);
+      if (a > 4){ el.style.opacity = 0; return; }
+      el.style.opacity = Math.max(.15, 1 - a * .28);
+      el.style.transform = `rotateX(${(-d * 20).toFixed(1)}deg) scale(${(1 - a * .07).toFixed(3)})`;
+      el.classList.toggle('on', i === k);
+    });
+  }
+  function commit(){
+    if (!sel || !armed) return;
+    const k = idxNow();
+    if (k !== cur){ cur = k; sel.selectedIndex = k; sel.dispatchEvent(new Event('change', { bubbles:true })); if (navigator.vibrate) try{ navigator.vibrate(8); }catch(e){} }
+  }
+  L.addEventListener('scroll', () => {
+    if (!raf) raf = requestAnimationFrame(paint);
+    clearTimeout(timer); timer = setTimeout(commit, 130);   // swipe stopped → apply immediately
+  }, { passive:true });
+  if ('onscrollend' in window) L.addEventListener('scrollend', () => { clearTimeout(timer); commit(); });
+  ['pointerdown', 'touchstart', 'wheel'].forEach(ev => L.addEventListener(ev, () => { armed = true; }, { passive:true }));
+  L.addEventListener('click', e => {
+    const i = items.indexOf(e.target.closest('.it')); if (i < 0) return;
+    armed = true; L.scrollTo({ top:i * H, behavior:'smooth' });
+  });
+  function open(s, label){
+    sel = s; armed = false; cur = s.selectedIndex;
+    T.innerHTML = label;
+    L.innerHTML = '<div class="sp"></div>' + [...s.options].map(o => `<div class="it">${o.textContent}</div>`).join('') + '<div class="sp"></div>';
+    items = [...L.querySelectorAll('.it')];
+    W.classList.add('on');
+    requestAnimationFrame(() => { L.scrollTop = Math.max(0, cur) * H; paint(); });
+  }
+  function close(){ commit(); W.classList.remove('on'); sel = null; }
+  W.querySelector('.bk').addEventListener('click', close);
+  document.getElementById('whlOk').addEventListener('click', close);
+  document.addEventListener('click', e => {
+    const c = e.target.closest && e.target.closest('.cell');
+    if (!c || W.contains(c)) return;
+    const s = c.querySelector('select'); if (!s || s.disabled) return;
+    const cl = c.querySelector('.cl, .lb');
+    const en = cl && cl.querySelector('.en'), ar = cl && cl.querySelector('.ar');
+    open(s, `${ar ? ar.textContent + ' ' : ''}${en ? `<span class="en">${en.textContent}</span>` : ''}`);
+  });
+})();
+</script>
 </body>
 </html>
