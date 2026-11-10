@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IHAB Fitting Card</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050f08">
+<link rel="icon" href="icon-512.png">
+<style>
+  :root{ --lime:#a3e635; --lime2:#d9f99d; --box:#06140b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; min-height:100%; }
+  body{ background:radial-gradient(circle at center, #2c3430 0%, #0d1310 100%); color:#e7f7d2; font-family:"Segoe UI", Tahoma, Arial, sans-serif; }
+  header{ position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between; gap:8px;
+          padding:8px 12px; background:#050f08; border-bottom:1px solid #a3e63599; box-shadow:0 2px 14px #a3e63533; }
+  header h1{ margin:0; font-size:15px; color:var(--lime); white-space:nowrap; }
+  .tools{ position:sticky; top:41px; z-index:4; display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; padding:7px 10px;
+          background:#07140c; border-bottom:1px solid #a3e63533; max-width:440px; margin:0 auto; }
+  .tbtn{ display:flex; flex-direction:column; align-items:center; gap:1px; background:#030a05; color:var(--lime); border:1px solid #a3e63566;
+         border-radius:10px; padding:5px 2px; font-size:17px; cursor:pointer; text-decoration:none; line-height:1.1; }
+  .tbtn span{ font-size:11.5px; color:#e7f7d2; }
+  .tbtn.main{ background:var(--lime); color:#0b1a0f; } .tbtn.main span{ color:#0b1a0f; font-weight:800; }
+  .ordbox{ display:flex; direction:ltr; flex-direction:row; align-items:center; justify-content:flex-start; background:var(--box); border:1px solid #a3e63550; border-radius:7px; height:38px; overflow:hidden; }
+  .ordbox .pre{ padding:0 4px 0 10px; color:var(--lime); font-family:Consolas, monospace; font-weight:700; font-size:14px; white-space:nowrap; }
+  .ordbox input{ border:none !important; height:36px !important; padding:0 10px 0 2px !important; flex:1; min-width:0; text-align:left; }   /* whole right side is the tap target */
+  .ordbox input:focus{ outline:none; }
+  /* search sheet */
+  #sheet{ position:fixed; inset:0; z-index:20; background:#030805; display:none; flex-direction:column; }
+  #sheet.on{ display:flex; }
+  #sheet .top{ display:flex; gap:8px; padding:10px; border-bottom:1px solid #a3e63544; }
+  #sheet .top input{ flex:1; height:42px; font-size:15px; }
+  #sheet .top button{ background:#173a22; color:var(--lime); border:1px solid var(--lime); border-radius:8px; padding:0 14px; font-size:15px; cursor:pointer; }
+  #sheet .list{ flex:1; overflow-y:auto; padding:8px 10px 30px; max-width:440px; width:100%; margin:0 auto; display:flex; flex-direction:column; gap:6px; }
+  #sheet .hint{ font-size:12px; color:#9fbf7a; text-align:center; padding:6px; }
+  .hbtns{ display:flex; gap:6px; }
+  .hbtn{ background:var(--lime); color:#0b1a0f; font-weight:800; border:none; border-radius:9px; padding:6px 12px; font-size:13px; cursor:pointer; text-decoration:none; white-space:nowrap; }
+  .hbtn.alt{ background:transparent; color:var(--lime); border:1px solid var(--lime); }
+  main{ max-width:420px; margin:0 auto; padding:12px 10px 40px; }
+  .sec{ border:1px solid #a3e63533; border-radius:12px; padding:10px 12px; margin-bottom:12px; background:rgba(22,52,30,.55); }
+  .sec h2{ color:var(--lime); font-size:14px; margin:0 0 8px; border-bottom:1px solid #a3e63530; padding-bottom:6px; }
+  .en{ direction:ltr; unicode-bidi:isolate; font-family:Consolas, monospace; font-weight:700; color:#bef264; }
+  /* field row: Arabic label (right) · English + normal range (centred over the box) · box (left) */
+  .f{ display:grid; grid-template-columns:158px 124px; justify-content:start; gap:2px 12px; align-items:center; padding:3px 2px 4px;
+      border-bottom:1px solid rgba(0,0,0,.6); box-shadow:0 1px 0 rgba(163,230,53,.12); }
+  .f:last-child{ border-bottom:none; box-shadow:none; }
+  .f .ar{ font-size:13.5px; }
+  .f .ar small{ display:block; color:#9fbf7a; font-size:11px; margin-top:2px; }
+  .f .cell{ display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .f .cell .en{ font-size:15px; white-space:nowrap; }
+  .f .cell{ gap:1px !important; }
+  .wide .head .en{ font-size:15px; }
+  .wide{ justify-content:stretch !important; grid-template-columns:1fr !important; }
+  select, input[type=text], textarea{
+    background:var(--box); color:var(--lime2); border:1px solid #a3e63550; border-radius:7px; font-size:14px;
+    font-family:Consolas, monospace; direction:ltr;
+  }
+  select{ width:78px; height:32px; text-align:center; text-align-last:center; }
+  select.warn{ border-color:#f87171; color:#fecaca; }
+  input[type=text]{ width:100%; height:38px; padding:0 10px; }
+  .wide{ grid-template-columns:1fr; }
+  .wide .head{ display:flex; justify-content:flex-start; gap:14px; align-items:baseline; }
+  .wide input[type=text], .wide .ordbox{ width:270px; max-width:100%; }
+  textarea{ width:100%; height:56px; padding:6px 10px; direction:rtl; font-family:inherit; }
+  .grp{ background:rgba(0,0,0,.28); border:1px solid rgba(0,0,0,.55); border-radius:12px; padding:6px 8px 4px; margin:8px 0;
+         box-shadow:inset 0 2px 6px rgba(0,0,0,.65), inset 0 -1px 0 rgba(163,230,53,.10), 0 1px 0 rgba(163,230,53,.12); }
+  .grp-h{ display:flex; justify-content:space-between; align-items:baseline; font-size:12.5px; color:var(--lime);
+          padding:0 2px 4px; border-bottom:1px dashed #a3e63540; margin-bottom:2px; }
+  .grp-h .en{ font-size:13px; }
+  .grp .total{ border-top:1px solid rgba(0,0,0,.6); box-shadow:inset 0 1px 0 rgba(163,230,53,.1); padding:5px 4px 2px; margin-top:2px; }
+  .total{ display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:13px; }
+  .total b{ font-family:Consolas, monospace; font-size:18px; color:var(--lime); direction:ltr; }
+  .save{ width:100%; background:var(--lime); color:#0b1a0f; font-weight:800; font-size:16px; border:none; border-radius:10px; padding:12px; cursor:pointer; box-shadow:0 0 14px #a3e63566; }
+  .save:disabled{ opacity:.5; }
+  .row2{ display:grid; grid-template-columns:1fr auto; gap:8px; }
+  .sbtn{ background:#173a22; color:var(--lime); border:1px solid var(--lime); border-radius:8px; padding:0 14px; font-size:14px; cursor:pointer; }
+  #status{ font-size:12.5px; margin-top:8px; min-height:18px; text-align:center; color:#bef264; }
+  #status.err{ color:#fca5a5; }
+  .res{ margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+  .hit, .res button{ text-align:right; background:#030a05; color:#e7f7d2; border:1px solid #a3e63530; border-radius:8px; padding:8px 10px; cursor:pointer; font-size:12.5px; }
+  .hit:hover, .res button:hover{ border-color:var(--lime); }
+  .hit .en, .res .en{ font-size:12.5px; }
+  .foot{ font-size:11px; color:#9fbf7a; text-align:center; line-height:1.7; }
+  .foot a{ color:var(--lime); }
+
+  .sub{ border:1px solid #a3e63533; border-radius:11px; margin:0 0 9px; background:rgba(22,52,30,.55); }
+  .sbh{ width:100%; display:flex; justify-content:space-between; align-items:center; background:none; border:none; color:var(--lime);
+        font-weight:800; font-size:14.5px; padding:11px 12px; cursor:pointer; font-family:inherit; direction:rtl; }
+  .sbh::after{ content:'▾'; font-size:15px; transition:transform .3s; }
+  .sub.open > .sbh::after{ transform:rotate(180deg); }
+  .sbb{ display:grid; grid-template-rows:0fr; transition:grid-template-rows .32s ease; }
+  .sub.open > .sbb{ grid-template-rows:1fr; }
+  .sbb > .in{ overflow:hidden; min-height:0; }
+  .pad{ padding:0 10px 10px; }
+  .cells{ display:grid; grid-template-columns:repeat(3, 1fr); gap:7px; margin:4px 0; }
+  .cell{ display:flex; flex-direction:column; gap:4px; align-items:stretch; background:rgba(0,0,0,.25); border:1px solid rgba(0,0,0,.55); border-radius:10px; padding:5px;
+         box-shadow:inset 0 2px 5px rgba(0,0,0,.6), 0 1px 0 rgba(163,230,53,.10); min-width:0; }
+  .cell .cl{ display:flex; flex-direction:column; align-items:center; line-height:1.2; }
+  .cell .cl .en{ font-size:13.5px; font-weight:800; white-space:nowrap; }
+  .cell .cl .ar{ font-size:10.5px; color:#d9f99dcc; white-space:nowrap; }
+  .cell select{ width:100%; height:38px; font-size:15px; font-weight:700; }
+  .cell .nr{ font-size:9.5px; color:#9fbf7a; text-align:center; }
+  .cell.tot b{ height:38px; display:flex; align-items:center; justify-content:center; font-family:Consolas, monospace; font-size:18px; color:var(--lime);
+               background:#030a05; border:1px solid var(--lime); border-radius:7px; direction:ltr; }
+  .cell.tot{ cursor:default; }
+  .sub textarea{ margin-top:2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🗂️ IHAB Fitting Card</h1>
+</header>
+<nav class="tools">
+  <a class="tbtn" href="./">🔬<span>المحاكي</span></a>
+  <button class="tbtn" id="logBtn">🔍<span>السجل</span></button>
+  <button class="tbtn" id="resetBtn">↺<span>ريست</span></button>
+  <button class="tbtn main" id="newBtn">📄<span>جديد</span></button>
+</nav>
+
+<main>
+  <div class="sub"><button class="sbh"><span>📋 بيانات الطلب</span></button><div class="sbb"><div class="in"><div class="pad">
+    <div class="f wide">
+      <div class="head"><span class="ar">🏷️ كود الفريم</span><span class="en">Frame Code</span></div>
+      <input type="text" id="code" placeholder="مثال: SPE-000836-0718" autocomplete="off">
+    </div>
+    <div class="f wide">
+      <div class="head"><span class="ar">🧾 رقم الأوردر</span><span class="en">Order No</span></div>
+      <div class="ordbox"><span class="pre">TBK-2500</span><input type="text" id="order" inputmode="numeric" placeholder="....." autocomplete="off"></div>
+    </div>
+  </div></div></div></div>
+<div id="fields"></div>
+  <div class="sub"><button class="sbh"><span>📝 ملاحظات</span></button><div class="sbb"><div class="in"><div class="pad">
+    <textarea id="notes" placeholder="أي ملاحظة عن التظبيط..."></textarea>
+  </div></div></div></div>
+  <button class="save" id="saveBtn">💾 حفظ في الشيت</button>
+  <div id="status"></div>
+
+  <div class="foot">
+    السجلات بتتحفظ في شيت <a href="https://docs.google.com/spreadsheets/d/1Ni-EX1SgcOJJl8XUmoPzbDkgpV1m3dWTUev6rhmaA5k/edit">IHAB Frame Fitting Records</a><br>
+    أي سجل أقدم من سنة بيتمسح تلقائياً مع كل حفظ جديد
+  </div>
+</main>
+
+<div id="sheet">
+  <div class="top">
+    <input type="text" id="q" placeholder="🔍 ابحث بكود الفريم أو رقم الأوردر" autocomplete="off">
+    <button id="closeSheet">✕</button>
+  </div>
+  <div class="list" id="results"></div>
+</div>
+
+<script>
+const SHEET_ID = '1Ni-EX1SgcOJJl8XUmoPzbDkgpV1m3dWTUev6rhmaA5k';
+const SERVER = 'Google Sheets';
+const KEEP_DAYS = 365;   // 1 year
+const $ = id => document.getElementById(id);
+const range = (a, b, st) => { const o = []; for (let v = a; v <= b + 1e-9; v += st) o.push(Math.round(v * 100) / 100); return o; };
+
+/* Fields of the fitting slip. All dropdowns start at 0. [key, Arabic, English, values, unit, normal range] */
+const FIELDS = [
+  ['panto', 'البانتو', 'Panto', range(0, 20, 2), '°', [8, 12]],
+  ['wrap', 'الالتفاف', 'Wrap', range(0, 20, 0.5), '°', [4, 6]],
+  ['bvd', 'بُعد العدسة', 'BVD', range(0, 25, 0.5), 'mm', [10, 15]],
+  ['segR', 'يمين', 'Seg R', range(0, 45, 0.5), 'mm', null],
+  ['segL', 'يسار', 'Seg L', range(0, 45, 0.5), 'mm', null],
+  ['pdR', 'يمين', 'PD R', range(0, 45, 0.5), 'mm', null],
+  ['pdL', 'يسار', 'PD L', range(0, 45, 0.5), 'mm', null]
+];
+const fmt = v => Number.isInteger(v) ? String(v) : v.toFixed(1);
+const fieldHTML = ([k, ar, en, vals, unit, nr]) => `
+  <div class="cell"><div class="cl"><span class="en">${en}</span><span class="ar">${ar}</span></div>
+    <select id="${k}">${vals.map(v => `<option value="${v}">${fmt(v)}${unit === '°' ? '°' : ''}</option>`).join('')}</select>
+    ${nr ? `<small class="nr">المعتاد ${nr[0]}–${nr[1]}</small>` : ''}
+  </div>`;
+/* Curtain sub-sections: frame position (Panto, Wrap, BVD) · segment heights · IPD (mono PDs + total) */
+const GROUPS = [
+  ['🕶️ وضع الفريم على الوش', ['panto', 'wrap', 'bvd']],
+  ['↕️ ارتفاع السيجمنت', ['segR', 'segL']],
+  ['↔️ المسافة الحدقية', ['pdR', 'pdL']]
+];
+$('fields').innerHTML = GROUPS.map(([ar, keys], gi) => `
+  <div class="sub"><button class="sbh"><span>${ar}</span></button><div class="sbb"><div class="in"><div class="pad">
+    <div class="cells">${keys.map(k => fieldHTML(FIELDS.find(f => f[0] === k))).join('')}${gi === 2 ? '<div class="cell tot"><div class="cl"><span class="en">Total PD</span><span class="ar">الكلية</span></div><b id="total">0.0</b></div>' : ''}</div>
+  </div></div></div></div>`).join('');
+document.querySelectorAll('.sbh').forEach(h => h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+function checkRanges(){
+  for (const [k, , , , , nr] of FIELDS){
+    const el = $(k), v = parseFloat(el.value);
+    el.classList.toggle('warn', !!nr && v !== 0 && (v < nr[0] || v > nr[1]));
+  }
+  $('total').textContent = (parseFloat($('pdR').value) + parseFloat($('pdL').value)).toFixed(1);
+}
+FIELDS.forEach(([k]) => $(k).addEventListener('change', checkRanges));
+
+const ORDER_PREFIX = 'TBK-2500';
+const orderFull = () => { const t = $('order').value.trim(); return t ? ORDER_PREFIX + t : ''; };
+function zeroMeasures(){ FIELDS.forEach(([k]) => { $(k).value = '0'; }); checkRanges(); }
+function resetForm(){
+  $('code').value = ''; $('order').value = ''; $('notes').value = '';
+  zeroMeasures(); setStatus('');
+}
+$('newBtn').addEventListener('click', resetForm);
+// ريست: zero every measurement (keeps code / order so you can fix a mistake quickly)
+$('resetBtn').addEventListener('click', () => { zeroMeasures(); setStatus('↺ القياسات رجعت صفر'); });
+
+function setStatus(msg, err = false){ const s = $('status'); s.textContent = msg; s.classList.toggle('err', err); }
+
+/* ---- Google Sheet through the owner's Apps Script web app (works outside Claude) ---- */
+const API = 'https://script.google.com/macros/s/AKfycbyIh908F6WWFNy6TtwRHDuvVGy5oRUvIZr2bUjM1h-RkbzJ6oLZmS9b3FLQ3Pc-_s7h/exec';
+const TOKEN = 'ihab-tbk-2500';
+const QKEY = 'ihab-card-pending';   // records waiting for internet
+async function api(action, extra = {}){
+  const r = await fetch(API, { method:'POST', body:JSON.stringify({ token:TOKEN, action, ...extra }), redirect:'follow' });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'error');
+  return j;
+}
+const pad = n => String(n).padStart(2, '0');
+function stamp(d = new Date()){ return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+const num = v => { const s = String(v ?? '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace('٫', '.').replace(',', '.'); const n = parseFloat(s); return isFinite(n) ? n : 0; };
+const getQ = () => { try{ return JSON.parse(localStorage.getItem(QKEY) || '[]'); }catch(e){ return []; } };
+const setQ = q => { try{ localStorage.setItem(QKEY, JSON.stringify(q)); }catch(e){} };
+async function flushQ(){
+  let q = getQ(), sent = 0;
+  while (q.length){ await api('save', { row:q[0] }); q.shift(); setQ(q); sent++; }
+  return sent;
+}
+async function readAll(){ const j = await api('list'); return [...(j.values || []), ...getQ()]; }
+$('saveBtn').addEventListener('click', async () => {
+  const code = $('code').value.trim(), order = orderFull();
+  if (!code && !order){ setStatus('اكتب كود الفريم أو رقم الأوردر الأول', true); return; }
+  const btn = $('saveBtn'); btn.disabled = true; setStatus('⏳ جاري الحفظ…');
+  const v = k => parseFloat($(k).value);
+  const row = [stamp(), code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim()];
+  setQ([...getQ(), row]);
+  resetForm(); allRows = null;
+  try{
+    const n = await flushQ();
+    setStatus(n > 1 ? `✅ اتحفظ في الشيت (ومعاه ${n - 1} كانوا مستنيين النت)` : '✅ اتحفظ في الشيت — الخانات رجعت صفر');
+  } catch(e){ console.error(e); setStatus('📴 مفيش نت — اتحفظ على الموبايل وهيترفع للشيت لوحده أول ما النت يرجع', true); }
+  finally{ btn.disabled = false; }
+});
+addEventListener('online', () => flushQ().then(n => n && setStatus(`✅ اترفع ${n} سجل كانوا مستنيين النت`)).catch(() => {}));
+function loadRow(r){
+  const ord = String(r[2] || '');
+  $('code').value = r[1] || ''; $('order').value = ord.startsWith(ORDER_PREFIX) ? ord.slice(ORDER_PREFIX.length) : ord; $('notes').value = r[11] || '';
+  FIELDS.forEach(([k], i) => {
+    const val = num(r[3 + i]), sel = $(k);
+    const opt = [...sel.options].reduce((b, o) => Math.abs(parseFloat(o.value) - val) < Math.abs(parseFloat(b.value) - val) ? o : b, sel.options[0]);
+    sel.value = opt.value;
+  });
+  checkRanges();
+  setStatus(`📂 اتحمّل سجل ${r[0] || ''} — ده نفس القياسات اللي اتظبط عليها الفريم`);
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+/* Search sheet: opens from 🔍 السجل, loads all rows once, filters live as you type (like phone contacts) */
+let allRows = null;
+function renderHits(){
+  const q = $('q').value.trim().toLowerCase(), box = $('results');
+  if (!allRows){ return; }
+  let hits = allRows.slice().reverse();
+  if (q) hits = hits.filter(r => String(r[1] || '').toLowerCase().includes(q) || String(r[2] || '').toLowerCase().includes(q));
+  hits = hits.slice(0, 40);
+  box.innerHTML = `<div class="hint">${q ? `${hits.length} نتيجة` : 'آخر السجلات — اكتب عشان تفلتر'}</div>`;
+  if (!hits.length && q) box.innerHTML += '<div class="hint">مفيش سجل بالكود أو الأوردر ده</div>';
+  hits.forEach(r => {
+    const b = document.createElement('button');
+    b.className = 'hit';
+    b.innerHTML = `📅 <span class="en">${r[0] || ''}</span><br>🏷️ <span class="en">${r[1] || '—'}</span> · 🧾 <span class="en">${r[2] || '—'}</span>`;
+    b.addEventListener('click', () => { closeSheet(); loadRow(r); });
+    box.appendChild(b);
+  });
+}
+async function openSheet(){
+  $('sheet').classList.add('on'); $('q').value = ''; setTimeout(() => $('q').focus(), 50);
+  const box = $('results');
+  box.innerHTML = '<div class="hint">⏳ بجيب السجلات…</div>';
+  try{ allRows = await readAll(); renderHits(); }
+  catch(e){ console.error(e); box.innerHTML = '<div class="hint" style="color:#fca5a5">مش قادر أوصل للشيت — اتأكد من النت</div>'; }
+}
+function closeSheet(){ $('sheet').classList.remove('on'); }
+$('logBtn').addEventListener('click', openSheet);
+$('closeSheet').addEventListener('click', closeSheet);
+$('q').addEventListener('input', renderHits);
+
+resetForm();
+flushQ().catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+<!-- ===== Wheel picker: tap a value box → a drum of numbers; swipe up/down, the value applies as soon as it stops ===== -->
+<style>
+  .cell select{ pointer-events:none; }
+  .cell{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  #whl{ position:fixed; inset:0; z-index:500; display:none; }
+  #whl.on{ display:block; }
+  #whl .bk{ position:absolute; inset:0; background:#0006; }
+  #whl .pn{ position:absolute; left:0; right:0; bottom:0; margin:0 auto; max-width:420px; background:#050f08; border:1px solid #a3e63599;
+            border-bottom:none; border-radius:18px 18px 0 0; box-shadow:0 -6px 24px #000a, 0 0 16px #a3e63533; padding:10px 14px 18px;
+            transform:translateY(100%); transition:transform .22s ease; }
+  #whl.on .pn{ transform:none; }
+  #whl .hd{ display:flex; justify-content:space-between; align-items:center; direction:rtl; padding:0 2px 8px; }
+  #whl .tt{ color:#a3e635; font-weight:800; font-size:15px; }
+  #whl .tt .en{ direction:ltr; unicode-bidi:isolate; font-family:Consolas, monospace; color:#bef264; margin-inline-start:6px; }
+  #whl .ok{ background:#a3e635; color:#0b1a0f; border:none; border-radius:9px; padding:7px 18px; font-weight:800; font-size:15px; cursor:pointer; }
+  #whl .wr{ position:relative; height:230px; perspective:600px; }
+  #whl .band{ position:absolute; left:8%; right:8%; top:93px; height:44px; border-radius:10px; border:1px solid #a3e635;
+              background:#a3e6351a; box-shadow:0 0 12px #a3e63544 inset; pointer-events:none; }
+  #whl .ls{ height:100%; overflow-y:scroll; scroll-snap-type:y mandatory; scrollbar-width:none; overscroll-behavior:contain;
+            -webkit-mask-image:linear-gradient(transparent, #000 30%, #000 70%, transparent); mask-image:linear-gradient(transparent, #000 30%, #000 70%, transparent); }
+  #whl .ls::-webkit-scrollbar{ display:none; }
+  #whl .it{ height:44px; line-height:44px; text-align:center; scroll-snap-align:center; font-family:Consolas, monospace; font-size:22px;
+            font-weight:700; color:#d9f99d; direction:ltr; user-select:none; transform-style:preserve-3d; }
+  #whl .it.on{ color:#a3e635; font-size:25px; }
+  #whl .sp{ height:93px; }
+</style>
+<div id="whl"><div class="bk"></div><div class="pn">
+  <div class="hd"><span class="tt" id="whlT"></span><button class="ok" id="whlOk">✓ تم</button></div>
+  <div class="wr"><div class="band"></div><div class="ls" id="whlL"></div></div>
+</div></div>
+<script>
+(() => {
+  const W = document.getElementById('whl'), L = document.getElementById('whlL'), T = document.getElementById('whlT'), H = 44;
+  let sel = null, items = [], cur = -1, armed = false, timer = 0, raf = 0;
+  const idxNow = () => Math.max(0, Math.min(items.length - 1, Math.round(L.scrollTop / H)));
+  function paint(){
+    raf = 0; const c = L.scrollTop / H, k = idxNow();
+    items.forEach((el, i) => {
+      const d = i - c, a = Math.abs(d);
+      if (a > 4){ el.style.opacity = 0; return; }
+      el.style.opacity = Math.max(.15, 1 - a * .28);
+      el.style.transform = `rotateX(${(-d * 20).toFixed(1)}deg) scale(${(1 - a * .07).toFixed(3)})`;
+      el.classList.toggle('on', i === k);
+    });
+  }
+  function commit(){
+    if (!sel || !armed) return;
+    const k = idxNow();
+    if (k !== cur){ cur = k; sel.selectedIndex = k; sel.dispatchEvent(new Event('change', { bubbles:true })); if (navigator.vibrate) try{ navigator.vibrate(8); }catch(e){} }
+  }
+  L.addEventListener('scroll', () => {
+    if (!raf) raf = requestAnimationFrame(paint);
+    clearTimeout(timer); timer = setTimeout(commit, 130);   // swipe stopped → apply immediately
+  }, { passive:true });
+  if ('onscrollend' in window) L.addEventListener('scrollend', () => { clearTimeout(timer); commit(); });
+  ['pointerdown', 'touchstart', 'wheel'].forEach(ev => L.addEventListener(ev, () => { armed = true; }, { passive:true }));
+  L.addEventListener('click', e => {
+    const i = items.indexOf(e.target.closest('.it')); if (i < 0) return;
+    armed = true; L.scrollTo({ top:i * H, behavior:'smooth' });
+  });
+  function open(s, label){
+    sel = s; armed = false; cur = s.selectedIndex;
+    T.innerHTML = label;
+    L.innerHTML = '<div class="sp"></div>' + [...s.options].map(o => `<div class="it">${o.textContent}</div>`).join('') + '<div class="sp"></div>';
+    items = [...L.querySelectorAll('.it')];
+    W.classList.add('on');
+    requestAnimationFrame(() => { L.scrollTop = Math.max(0, cur) * H; paint(); });
+  }
+  function close(){ commit(); W.classList.remove('on'); sel = null; }
+  W.querySelector('.bk').addEventListener('click', close);
+  document.getElementById('whlOk').addEventListener('click', close);
+  document.addEventListener('click', e => {
+    const c = e.target.closest && e.target.closest('.cell');
+    if (!c || W.contains(c)) return;
+    const s = c.querySelector('select'); if (!s || s.disabled) return;
+    const cl = c.querySelector('.cl, .lb');
+    const en = cl && cl.querySelector('.en'), ar = cl && cl.querySelector('.ar');
+    open(s, `${ar ? ar.textContent + ' ' : ''}${en ? `<span class="en">${en.textContent}</span>` : ''}`);
+  });
+})();
+</script>
+</body>
+</html>
