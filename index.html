@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IHAB Lens Thickness Simulator 3D</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#050f08">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-512.png">
+
+
+<!-- OCR -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<!-- Three.js (ES Modules) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<style>
+  :root{ --lime:#a3e635; --lime2:#d9f99d; --panel:rgba(9,26,15,.92); --box:#06140b; }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; overflow:hidden; }
+  body{
+    background: radial-gradient(circle at center, #5a5f66 0%, #202326 100%);
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif; color:#e7f7d2;
+    display:flex; flex-direction:column;
+  }
+  header{
+    flex:none; height:52px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:0 16px; background:#050f08; border-bottom:1px solid #a3e63599; box-shadow:0 2px 14px #a3e63533;
+  }
+  header h1{ margin:0; font-size:21px; color:var(--lime); font-weight:800; letter-spacing:.3px; }
+  header .hstat{ font-size:12px; color:#bef264; }
+  #newBtn{
+    background:var(--lime); color:#0b1a0f; font-weight:800; font-size:15px;
+    border:none; border-radius:9px; padding:7px 16px; cursor:pointer; box-shadow:0 0 12px #a3e63588;
+  }
+  .hb{ display:flex; gap:6px; align-items:center; }
+  #cardBtn{ color:var(--lime); border:1px solid var(--lime); border-radius:9px; padding:6px 10px; font-weight:700; font-size:14px; text-decoration:none; white-space:nowrap; }
+  #app{ flex:1; display:flex; min-height:0; }
+  #panel{ width:380px; flex:none; overflow-y:auto; padding:12px; background:var(--panel); border-left:2px solid #a3e63544; }
+  #viewport{ flex:1; position:relative; min-width:0; }
+  #c{ display:block; width:100%; height:100%; }
+
+  .sec{ border:1px solid #a3e63533; border-radius:12px; padding:10px 12px; margin-bottom:12px; background:rgba(22,52,30,.55); }
+  .sec-h{ display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #a3e63530; padding-bottom:8px; margin-bottom:10px; }
+  .sec-h h2{ color:var(--lime); font-size:15px; margin:0; }
+  .rst{ background:#1e3a5f; border:1px solid #60a5fa88; color:#bfdbfe; border-radius:6px; width:26px; height:24px; cursor:pointer; font-size:13px; padding:0; }
+  .rst:hover{ background:#2b5287; }
+
+  .ctrl{ margin:6px 0; font-size:12.5px; padding:6px 8px 8px; border-radius:10px; background:rgba(0,0,0,.22);
+         border:1px solid rgba(0,0,0,.55); box-shadow:inset 0 2px 5px rgba(0,0,0,.6), 0 1px 0 rgba(163,230,53,.10); }
+  /* wider engraved box that holds related values together */
+  .cgrp{ margin:10px 0; padding:6px 6px 2px; border-radius:13px; background:rgba(0,0,0,.18);
+         border:1px solid rgba(0,0,0,.6); box-shadow:inset 0 3px 8px rgba(0,0,0,.6), inset 0 -1px 0 rgba(163,230,53,.08), 0 1px 0 rgba(163,230,53,.12); }
+  .cgrp-h{ display:flex; justify-content:space-between; align-items:baseline; font-size:12.5px; color:var(--lime); padding:2px 6px 4px; border-bottom:1px dashed #a3e63540; }
+  .cgrp .ctrl{ background:rgba(0,0,0,.25); }
+  .ctrl .lh{ display:grid; grid-template-columns:1fr 78px; gap:10px; align-items:baseline; padding:0 2px 3px; margin-bottom:4px;
+             border-bottom:1px solid rgba(0,0,0,.6); box-shadow:0 1px 0 rgba(163,230,53,.16); }   /* thin engraved line */
+  .ctrl .lh .en{ direction:ltr; color:#bef264; font-family:Consolas, monospace; font-size:13px; font-weight:700; letter-spacing:.4px; }
+  .en-t{ font-weight:700; font-size:1.1em; }
+  .gbtn{ font-weight:600; }
+  .ctrl .body{ display:grid; grid-template-columns:1fr 78px; gap:10px; align-items:center; }
+  .ctrl .lh .en{ text-align:center; }
+  /* compact, near-square value boxes, pulled in from the left edge, each centred under its English label */
+  .ctrl .lh, .ctrl .body{ grid-template-columns:1fr 66px; padding-left:14px; }
+  .ctrl select{ height:34px; text-align:center; text-align-last:center; padding:0 2px; font-size:13px; }
+  .ctrl.has-fh .body{ grid-template-columns:1fr 66px 66px; }
+  .ctrl.has-fh .lh{ grid-template-columns:1fr 142px; }
+  .fh{ height:34px; display:flex; flex-direction:column; justify-content:center; }
+  input[type=range]{ touch-action:pan-y; }   /* vertical swipes scroll the page instead of moving a slider */
+  .ctrl select{ padding:2px 4px; }
+  #ocBtns .gbtn{ direction:ltr; unicode-bidi:isolate; font-size:12px; white-space:nowrap; }
+  .fh{ background:#030a05; border:1px solid var(--lime); border-radius:6px; text-align:center; line-height:1.05; padding:2px 0;
+       box-shadow:inset 0 1px 3px rgba(0,0,0,.7); direction:ltr; }
+  .fh b{ display:block; color:var(--lime); font-family:Consolas, monospace; font-size:14px; }
+  .fh small{ color:#bef264; font-size:9.5px; letter-spacing:.3px; }
+  .ctrl.dis{ opacity:.35; pointer-events:none; }
+  input[type=range]{ width:100%; accent-color:var(--lime); direction:ltr; }
+  select{
+    background:var(--box); color:var(--lime2); border:1px solid #a3e63540; border-radius:6px;
+    padding:4px 4px; font-size:13px; font-family:Consolas, monospace; direction:ltr; width:100%;
+  }
+  .prow{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:6px 0; }
+  .prow > div{ display:flex; flex-direction:column; gap:3px; font-size:12px; align-items:center; }
+  .lrow{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin:6px 0; font-size:13px; }
+  .lrow select{ width:96px; }
+  .eye-h{ background:#030a05; border-right:3px solid var(--lime); padding:5px 8px; margin:12px 0 6px; font-weight:700; color:var(--lime); font-size:13px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:8px 0; }
+  .gbtn{ background:#030a05; color:#e7f7d2; border:1px solid #a3e63530; border-radius:6px; padding:8px 4px; cursor:pointer; font-size:13px; }
+  .gbtn:hover{ border-color:var(--lime); }
+  .gbtn.on{ background:var(--lime); color:#0b1a0f; font-weight:800; }
+  .ocr-btns{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .ocr-btns label{ text-align:center; padding:9px; border-radius:8px; cursor:pointer; font-weight:700; font-size:14px; }
+  .ocr-btns .cam{ background:var(--lime); color:#0b1a0f; }
+  .ocr-btns .att{ border:1px solid var(--lime); color:var(--lime); }
+  .ocr-btns input{ display:none; }
+  #ocrStatus{ font-size:12px; color:#bef264; margin-top:6px; }
+  #ocrText{ width:100%; height:58px; background:#07160c; color:#cfe9b0; border:1px solid #a3e63530; border-radius:6px; font-size:11px; direction:ltr; margin-top:6px; display:none; }
+  input[type=color]{ background:var(--box); border:1px solid #a3e63540; border-radius:6px; padding:0; width:96px; height:28px; }
+  .chk{ display:flex; gap:6px; align-items:center; font-size:13px; }
+  table.stats{ width:100%; border-collapse:collapse; font-size:12px; }
+  table.stats th, table.stats td{ border-bottom:1px solid #a3e63522; padding:4px 3px; text-align:right; }
+  table.stats th{ color:var(--lime); }
+  table.stats td.n{ direction:ltr; unicode-bidi:isolate; text-align:center; color:#ecfccb; }
+  .warn{ color:#f87171 !important; }
+  .sw-h{ font-size:13px; margin:10px 0 4px; }
+  .sw-h b{ color:var(--lime2); font-weight:600; }
+  .sh-row{ display:flex; justify-content:center; gap:6px; flex-wrap:wrap; margin:8px 0 4px; padding:6px 4px;
+           background:rgba(0,0,0,.25); border-radius:10px; box-shadow:inset 0 1px 3px rgba(0,0,0,.6); }
+  .sh{ background:#030a05; color:#bef264; border:1px solid #a3e63530; border-radius:8px; padding:3px 4px; cursor:pointer; line-height:0; }
+  .sh:hover{ border-color:var(--lime); }
+  .sh.on{ border-color:var(--lime); color:#0b1a0f; background:var(--lime); }
+  .sh.on path{ fill:rgba(0,0,0,.15); }
+  .sh-photo{ flex-direction:column; align-items:center; gap:6px; }
+  .sh-up{ background:var(--lime); color:#0b1a0f; font-weight:700; border-radius:8px; padding:7px 14px; cursor:pointer; font-size:13px; }
+  .sh-up input{ display:none; }
+  .sh-btns{ display:grid; grid-template-columns:1fr 1fr; gap:8px; width:100%; max-width:290px; }
+  .sh-btns .sh-up{ text-align:center; }
+  .sh-up.alt{ background:transparent; color:var(--lime); border:1px solid var(--lime); }
+  .sh-edit{ background:#173a22; color:var(--lime); border:1px solid var(--lime); border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer; font-weight:700; }
+  #trEd{ position:fixed; inset:0; z-index:300; background:#020604; display:none; flex-direction:column; align-items:center; }
+  #trEd.on{ display:flex; }
+  #trEd .hd{ color:var(--lime); font-size:13px; text-align:center; padding:10px 12px 6px; line-height:1.5; }
+  #trEd canvas{ touch-action:none; max-width:100vw; border-top:1px solid #a3e63544; border-bottom:1px solid #a3e63544; }
+  #trEd .md{ display:flex; gap:8px; padding:2px 0 6px; }
+  #trEd .md button{ background:#030a05; color:#e7f7d2; border:1px solid #a3e63555; border-radius:16px; padding:5px 14px; font-size:13px; cursor:pointer; }
+  #trEd .md button.on{ background:var(--lime); color:#0b1a0f; font-weight:800; }
+  #trEd .np{ display:flex; align-items:center; gap:6px; font-size:12px; color:#bef264; padding:0 0 6px; }
+  #trEd .np button{ background:#030a05; color:#e7f7d2; border:1px solid #a3e63555; border-radius:8px; width:38px; height:28px; font-size:13px; cursor:pointer; font-family:Consolas, monospace; }
+  #trEd .np button.on{ background:var(--lime); color:#0b1a0f; font-weight:800; }
+  #trEd .rd{ display:flex; align-items:center; gap:8px; font-size:11.5px; color:#bef264; padding:0 0 8px; width:min(330px, 92vw); }
+  #trEd .rd input{ flex:1; accent-color:var(--lime); direction:ltr; }
+  #trEd .rd.off{ opacity:.35; pointer-events:none; }
+  #trEd .bt{ display:flex; gap:10px; padding:12px; }
+  #trEd .bt button{ border-radius:9px; padding:9px 18px; font-size:15px; font-weight:800; cursor:pointer; }
+  #trEd .ok{ background:var(--lime); color:#0b1a0f; border:none; }
+  #trEd .no{ background:transparent; color:var(--lime); border:1px solid var(--lime); }
+  .sh-prev{ max-width:150px; border-radius:8px; border:1px solid #a3e63555; }
+  .sh-note{ font-size:11px; color:#bef264; text-align:center; padding:0 6px; }
+  .sw-tabs{ display:grid; grid-template-columns:repeat(auto-fit, minmax(62px, 1fr)); gap:4px; margin:4px 0 2px; }
+  .sw-tab{ background:#030a05; color:#d9f99d; border:1px solid #a3e63530; border-radius:14px; padding:4px 2px; font-size:11px; cursor:pointer; white-space:nowrap; }
+  .sw-tab.on{ border-color:var(--lime); color:var(--lime); box-shadow:inset 0 -2px 0 var(--lime); }
+  .sw-row{ display:flex; align-items:center; justify-content:center; gap:9px; margin:8px 0 4px; padding:6px 0;
+           flex-wrap:wrap; background:rgba(0,0,0,.25); border-radius:10px; box-shadow:inset 0 1px 3px rgba(0,0,0,.6); }
+  .sw-row .lb{ font-size:11px; color:#bef264; width:72px; white-space:nowrap; flex:none; }
+  .sw{ width:18px; height:18px; border-radius:50%; cursor:pointer; border:1px solid #ffffff40; padding:0; flex:none; }
+  .sw.gloss{ background-image:radial-gradient(circle at 32% 28%, rgba(255,255,255,.85) 0 12%, rgba(255,255,255,0) 45%); }
+  .sw.clear{ background-image:radial-gradient(circle at 32% 28%, rgba(255,255,255,.9) 0 12%, rgba(255,255,255,0) 45%),
+             repeating-linear-gradient(45deg, rgba(255,255,255,.18) 0 3px, transparent 3px 6px); }
+  .sw.on{ outline:2px solid var(--lime); outline-offset:2px; }
+  .chks{ display:flex; flex-wrap:wrap; gap:8px 14px; margin-top:8px; }
+  #legend{ position:absolute; right:16px; bottom:16px; display:flex; flex-direction:column; gap:3px; font-size:11px;
+           background:rgba(5,15,8,.75); border:1px solid #a3e63555; border-radius:8px; padding:5px 9px; pointer-events:auto; }
+  #legend label{ display:flex; align-items:center; gap:4px; cursor:pointer; }
+  #legend input{ accent-color:var(--lime); width:14px; height:14px; margin:0; }
+
+  .views{ position:absolute; top:14px; right:14px; display:flex; gap:8px; flex-wrap:wrap; }
+  .views button{ background:rgba(5,15,8,.8); color:var(--lime); border:1px solid var(--lime); border-radius:6px; padding:6px 12px; cursor:pointer; font-size:13px; }
+  .views button:hover, .views button.on{ background:#1f4d2d; }
+  .short{ display:none; }
+  .views .tgl{ border-style:dashed; }
+  .views .tgl.off{ opacity:.55; text-decoration:line-through; }
+  #fsBtn{ position:absolute; top:14px; left:14px; z-index:5; width:34px; height:34px; border-radius:8px; cursor:pointer;
+          background:rgba(5,15,8,.8); color:var(--lime); border:1px solid var(--lime); font-size:18px; line-height:1; padding:0; }
+  body.fs #viewport{ position:fixed !important; inset:0; background:radial-gradient(circle at center, #5a5f66 0%, #202326 100%); width:100vw !important; height:100vh !important; height:100dvh !important; z-index:100; }
+  body.fs #legend, body.fs #hint{ display:none !important; }
+  /* full screen: view buttons sit at the bottom, beside the protrusion box, with the close button right above them */
+  body.fs{ --hudw:310px; --vw:min(420px, calc(100vw - var(--hudw) - 24px)); }
+  body.fs .views{ display:flex !important; top:auto !important; left:auto !important; bottom:16px; right:10px; width:var(--vw);
+                  flex-wrap:wrap !important; justify-content:center; gap:6px; }
+  body.fs #fsBtn{ top:auto !important; left:auto !important; bottom:calc(16px + var(--vbh, 40px) + 10px); right:calc(10px + var(--vw) / 2 - 17px); }
+  body.fs #hud{ background:rgba(5,15,8,.35); border-color:#a3e63566; box-shadow:none; opacity:.85; }
+  #hud{
+    position:absolute; left:16px; bottom:16px; background:rgba(5,15,8,.9); border:1px solid var(--lime);
+    border-radius:10px; padding:10px 16px; min-width:290px; box-shadow:0 0 14px #a3e63544;
+  }
+  #hud .t{ font-size:13px; text-align:center; border-bottom:1px dashed #a3e63555; padding-bottom:6px; margin-bottom:6px; }
+  #hud .g{ display:grid; grid-template-columns:1fr 1fr; text-align:center; font-size:12px; }
+  #hud .v{ font-family:Consolas, monospace; font-size:24px; font-weight:800; color:var(--lime); direction:ltr; }
+  #hud .v.bad{ color:#f87171; }
+  #hint{ position:absolute; bottom:16px; left:50%; transform:translateX(-50%); font-size:11px; color:#d9f99d99; pointer-events:none; }
+  #err{ position:absolute; top:60px; left:50%; transform:translateX(-50%); background:#7f1d1d; color:#fff; padding:6px 12px; border-radius:8px; font-size:12px; display:none; }
+
+  /* ===== Mobile (e.g. Galaxy S23 Ultra, ~384px wide): compact, centred controls ===== */
+  @media (max-width: 820px){
+    header{ height:46px; padding:0 10px; }
+    header h1{ font-size:15px; }
+    header .hstat{ font-size:10px; text-align:center; }
+    #newBtn{ font-size:13px; padding:6px 10px; }
+    #app{ flex-direction:column-reverse; }
+    #panel{ width:100%; height:56%; border-left:none; border-top:2px solid #a3e63544; padding:10px 8px; }
+    #viewport{ height:44%; flex:none; }
+
+    .sec{ max-width:340px; margin:0 auto 12px; }
+    .sec-h h2{ font-size:14px; }
+    .eye-h{ text-align:center; border-right:none; border-bottom:2px solid var(--lime); }
+    .ctrl{ max-width:300px; margin:3px auto 7px; }
+    .ctrl .body input[type=range]{ margin-right:56px; width:calc(100% - 56px); }   /* slider starts ~2 cm from the right screen edge */
+    .lrow{ justify-content:center; gap:14px; max-width:300px; margin:8px auto; }
+    .lrow select, .lrow input[type=color]{ width:90px; }
+    .prow{ max-width:250px; margin:6px auto; }
+    .grid2{ max-width:290px; margin:8px auto; }
+    .ocr-btns{ max-width:290px; margin:0 auto; }
+    #ocrStatus{ text-align:center; }
+
+    /* compact overlays so the glasses get the room */
+    .full{ display:none; } .short{ display:inline; }
+    header h1{ font-size:13px; white-space:nowrap; } header .hstat{ display:none; }
+    header h1 .en-t{ font-size:1em; } #newBtn{ white-space:nowrap; }
+    #cardBtn{ font-size:12px; padding:5px 8px; } header h1{ font-size:11.5px; }
+    #fsBtn{ top:5px; left:5px; width:28px; height:26px; font-size:15px; }
+    body.fs{ --hudw:118px; --vbh:62px; }
+    body.fs .views{ bottom:8px; right:6px; }
+    body.fs .views button{ font-size:12px; padding:5px 10px; }
+    body.fs #fsBtn{ width:36px; height:34px; font-size:18px; bottom:calc(8px + var(--vbh) + 10px); right:calc(6px + var(--vw) / 2 - 18px); }
+    .views{ top:5px; right:5px; left:38px; justify-content:center; gap:4px; flex-wrap:nowrap; }
+    .views button{ font-size:10.5px; padding:3px 9px; border-radius:12px; }
+    #hud{ left:5px; bottom:5px; min-width:0; padding:3px 8px; border-radius:8px; box-shadow:none; }
+    #hud .t{ font-size:9px; padding-bottom:2px; margin-bottom:2px; }
+    #hud .g{ font-size:8.5px; gap:10px; }
+    #hud .v{ font-size:13px; }
+    #hint{ display:none; }
+    #legend{ right:5px; bottom:5px; font-size:9px; padding:3px 6px; flex-direction:row; gap:8px; }
+    .sw-row{ justify-content:center; } .sw-row .lb{ width:auto; flex-basis:100%; text-align:center; }
+    .sw-h{ text-align:center; } .chks{ justify-content:center; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>IHAB Lens Thickness Simulator 3D</h1>
+  <span class="hstat" id="hstat">العدسة مركّبة Flush مع الإطار ✓</span>
+  <span class="hb"><a id="cardBtn" href="https://claude.ai/artifact/UG3ZEu1Vu5ea6UzwiN8sdV" title="كارت قياسات الفريم">🗂️ كارت</a><button id="newBtn" title="جلسة جديدة">📄 جديد</button></span>
+</header>
+
+<div id="app">
+  <!-- ======= لوحة التحكم ======= -->
+  <aside id="panel">
+    <div class="sec">
+      <div class="sec-h"><h2>استخراج الفحص (OCR)</h2></div>
+      <div class="ocr-btns">
+        <label class="cam">📷 تصوير<input type="file" id="ocrCam" accept="image/*" capture="environment"></label>
+        <label class="att">📄 إرفاق<input type="file" id="ocrFile" accept="image/*"></label>
+      </div>
+      <div id="ocrStatus">صوّر الروشتة أو ارفع صورتها وهتتملى القيم تلقائياً</div>
+      <textarea id="ocrText" readonly></textarea>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>مقاسات النظر (RX) والمسافة الحدقية</h2><button class="rst" data-reset="rx" title="إعادة القسم">🔄</button></div>
+      <div class="lrow"><b>المسافة الكلية PD</b><select id="pd"></select></div>
+      <div class="prow">
+        <div>يمين OD<select id="pdR"></select></div>
+        <div>يسار OS<select id="pdL"></select></div>
+      </div>
+      <div id="ocCtrl"></div>
+      <div class="grid2" id="ocBtns"></div>
+      <div class="cgrp"><div class="cgrp-h"><span>👁️ العين اليمنى</span><span class="en">OD</span></div><div id="eyeR"></div></div>
+      <div class="cgrp"><div class="cgrp-h"><span>👁️ العين اليسرى</span><span class="en">OS</span></div><div id="eyeL"></div></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>العدسة (Index & Design)</h2><button class="rst" data-reset="lens" title="إعادة القسم">🔄</button></div>
+      <div id="lensCtrls"></div>
+      <div class="grid2" id="designBtns"></div>
+      <div class="lrow"><span>لون طبقة AR</span>
+        <select id="ar"><option value="green">أخضر</option><option value="purple">بنفسجي</option><option value="blue">أزرق</option><option value="none">بدون</option></select>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>الإطار (Frame Style)</h2><button class="rst" data-reset="style" title="إعادة القسم">🔄</button></div>
+      <div class="grid2" id="frameBtns"></div>
+      <div class="sw-h">شكل العدسة: <b id="shName"></b></div>
+      <div id="shapes"></div>
+      <div class="sw-h">لون الإطار: <b id="swName"></b></div>
+      <div id="swatches"></div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>نظام الإطار (Boxing System)</h2><button class="rst" data-reset="frame" title="إعادة القسم">🔄</button></div>
+      <div class="sh-btns" style="margin:4px auto 6px">
+        <label class="sh-up">📷 صوّر الذراع<input type="file" id="armCam" accept="image/*" capture="environment"></label>
+        <label class="sh-up alt">🖼️ من الاستديو<input type="file" id="armFile" accept="image/*"></label>
+      </div>
+      <div class="sh-note" id="armNote" style="margin-bottom:6px">صوّر الكتابة اللي جوه ذراع الفريم (زي ‎52□18-140) وهتتملى المقاسات لوحدها</div>
+      <div id="frameCtrls"></div>
+      <div class="chks">
+        <span class="chk"><input type="checkbox" id="showFrame"><label for="showFrame">إظهار الإطار</label></span>
+        <span class="chk"><input type="checkbox" id="showGC"><label for="showGC">🔵 المركز الهندسي</label></span>
+        <span class="chk"><input type="checkbox" id="showOC"><label for="showOC">🔴 مركز العميل البصري</label></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======= منطقة العرض ======= -->
+  <div id="viewport">
+    <canvas id="c"></canvas>
+    <button id="fsBtn" title="ملء الشاشة">⛶</button>
+    <div class="views">
+      <button data-view="iso"><span class="full">زاوية 3D</span><span class="short">3D</span></button>
+      <button data-view="top"><span class="full">علوية (Top)</span><span class="short">علوي</span></button>
+      <button data-view="side"><span class="full">جانبية (Side)</span><span class="short">جانبي</span></button>
+      <button data-view="front"><span class="full">أمامية (Front)</span><span class="short">أمامي</span></button>
+      <button id="spinBtn" title="دوران بانورامي"><span class="full">🔄 دوران (360°)</span><span class="short">🔄 دوران</span></button>
+      <button id="frameTgl" class="tgl" title="إظهار / إخفاء الإطار">👓<span class="full"> الإطار</span></button>
+    </div>
+    <div id="hud">
+      <div class="t">البروز الخلفي الفعلي<span class="full"> (Temporal Protrusion)</span></div>
+      <div class="g">
+        <div>اليمنى (OD)<div class="v" id="hudR">0.00</div></div>
+        <div>اليسرى (OS)<div class="v" id="hudL">0.00</div></div>
+      </div>
+    </div>
+    <div id="legend"><label><input type="checkbox" id="lgGC">🔵 <span class="full">المركز </span>الهندسي<span class="full"> للإطار</span></label><label><input type="checkbox" id="lgOC">🔴 <span class="full">مركز </span>العميل<span class="full"> البصري</span></label></div>
+    <div id="hint">اسحب للدوران • العجلة للتقريب</div>
+    <div id="err"></div>
+    <div id="trEd">
+      <div class="hd">اسحب النقط الخضرا لحد ما تقعد على حافة العدسة بالظبط — خصوصاً الزوايا</div>
+      <div class="md">
+        <button id="trM1" class="on">📐 زوايا</button>
+        <button id="trM2">〰️ منحنيات</button>
+      </div>
+      <div class="np" id="trNp"><span>عدد النقط</span><button data-n="12">12</button><button data-n="16">16</button><button data-n="20">20</button><button data-n="24">24</button><button data-n="32">32</button></div>
+      <div class="rd" id="trRdRow"><span>زوايا مدوّرة</span><input type="range" id="trRd" min="0" max="45" step="1" value="12"><span>زوايا حادة</span></div>
+      <canvas id="trCv"></canvas>
+      <div class="bt"><button class="no" id="trNo">إلغاء</button><button class="ok" id="trOk">تم ✓ طبّق الشكل</button></div>
+    </div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/* =====================================================================
+   1) STATE
+   ===================================================================== */
+const FRAME_COLORS = { plastic:'#1d1d1f', metal:'#c8a24a', halfrim:'#3a3f47', rimless:'#b8bec7' };
+const DEFAULTS = {
+  R:{ sph:0, cyl:0, axis:0 }, L:{ sph:0, cyl:0, axis:0 },
+  index:1.60, frame:'plastic', swatch:'pl_black_g', shape:'rectangle',
+  A:54, B:40, DBL:18, depth:3.5, design:'aspheric',
+  pd:60.0, pdR:30.0, pdL:30.0,
+  wrap:5, panto:8, ar:'green', showFrame:true, showOC:true, showGC:true, ocMode:'center', ocManual:0
+};
+let state = structuredClone(DEFAULTS);
+
+const TOOLING_INDEX = 1.53;
+let fsOn = false;   // full-screen preview mode
+let markerMeshes = []; // centre markers of the current model (hidden in full screen)
+/* Fitting height (FH) = height of the customer's pupil above the lens bottom.
+   Measured FH: 2/3 rule (B/3×2) or manual. Final FH: for Aspheric / Double Aspheric / FreeForm the OC is lowered
+   1 mm for every 2° of pantoscopic tilt (FH_final = FH − panto/2), so the optical axis passes through the eye
+   when the frame is tilted. On GC (geometric centre) mode no correction is applied. */
+const fhMeasured = () => state.B / 2 + ocUp();
+const pantoDrop = () => (state.ocMode !== 'center' && state.design !== 'spheric') ? state.panto / 2 : 0;
+const fhFinal = () => fhMeasured() - pantoDrop();
+function ocUp(){   // mm above the geometric centre
+  if (state.ocMode === 'twothirds') return Math.round(state.B / 3 * 2 * 2) / 2 - state.B / 2;   // B/3×2, to the nearest 0.5 mm
+  if (state.ocMode === 'manual') return state.ocManual;
+  return 0;
+}                       // standard tooling index
+const TC_MIN = { '1.50':2.0, '1.56':1.8, '1.60':1.5, '1.67':1.3, '1.74':1.2 }; // min centre thickness (minus lenses)
+// Min edge thickness (plus lenses) depends on how the lens is held: groove (half-rim) and drill holes (rimless) need more
+const MIN_EDGE = { plastic:1.0, metal:1.0, halfrim:1.8, rimless:1.6 };
+const AR_COLORS = { green:0x39ff88, purple:0xb36bff, blue:0x4aa8ff, none:0xffffff };
+
+/* =====================================================================
+   2) RENDERER / SCENE / CAMERA
+   ===================================================================== */
+const canvas = document.getElementById('c');
+const viewport = document.getElementById('viewport');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);            // transparent → CSS studio gradient shows through
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.autoClear = false;                      // we render two layer passes manually
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(36, 1, 1, 3000);
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 70;
+controls.maxDistance = 600;
+
+/* ---- Lights ----
+   BUG FIX #4 (Lighting bleed):
+   three.js has no per-object light masks, so we use Object3D.layers + two render passes:
+     Layer 0 → frame & hardware. Layer 1 → lens meshes only.
+     Studio lights are enabled on BOTH layers; AR PointLights live ONLY on layer 1.
+   Pass 1 renders camera.layers=0 (frame sees studio lights only).
+   Pass 2 renders camera.layers=1 (lens sees studio + AR lights), depth buffer kept,
+   so the coloured AR glints can never touch the plastic/metal frame. */
+function studioLight(light){ light.layers.enable(0); light.layers.enable(1); scene.add(light); return light; }
+studioLight(new THREE.AmbientLight(0xffffff, 0.35));
+studioLight(new THREE.HemisphereLight(0xe8f0ff, 0x30343a, 0.55));
+const key = studioLight(new THREE.DirectionalLight(0xffffff, 2.2)); key.position.set(140, 180, 220);
+const fill = studioLight(new THREE.DirectionalLight(0xdfe8ff, 0.9)); fill.position.set(-180, 60, 120);
+const rimL = studioLight(new THREE.DirectionalLight(0xffffff, 0.8)); rimL.position.set(0, 100, -250);
+
+const arLights = [];
+[[ 70, 45, 120], [-90, -30, 140]].forEach(p => {
+  const l = new THREE.PointLight(AR_COLORS.green, 1.0, 0, 0); // decay 0 → stable intensity in mm-scale scene
+  l.position.set(...p);
+  l.layers.set(1);            // ONLY layer 1 → lens only
+  scene.add(l); arLights.push(l);
+});
+
+/* ---- Materials (shared, never disposed on rebuild) ---- */
+const frameMat = new THREE.MeshPhysicalMaterial({ color:0x141414, roughness:0.32, metalness:0, clearcoat:1, clearcoatRoughness:0.08, side:THREE.DoubleSide });
+const hingeMat = new THREE.MeshStandardMaterial({ color:0xb9bec6, metalness:1, roughness:0.25 });
+const tipMat   = new THREE.MeshPhysicalMaterial({ color:0x1b1b1d, roughness:0.45, clearcoat:0.6, side:THREE.DoubleSide });
+const padMat   = new THREE.MeshPhysicalMaterial({ color:0xf3f6f8, roughness:0.2, transparent:true, opacity:0.55, depthWrite:false });
+const nylonMat = new THREE.MeshStandardMaterial({ color:0xf2f2f2, roughness:0.4, transparent:true, opacity:0.8 });
+const lensMat  = new THREE.MeshPhysicalMaterial({
+  // AR look: no white clearcoat; reflections are faint and tinted by the AR residual colour (specularColor)
+  color:0xffffff, roughness:0.12, metalness:0, transparent:true, opacity:0.2,
+  clearcoat:0, specularIntensity:0.55, specularColor:new THREE.Color(AR_COLORS.green),
+  envMapIntensity:0.8, side:THREE.DoubleSide, depthWrite:false
+});
+const edgeMat  = new THREE.MeshStandardMaterial({ color:0xe3ecef, roughness:0.55, transparent:true, opacity:0.72, side:THREE.DoubleSide, depthWrite:false });
+const ocMat    = new THREE.MeshBasicMaterial({ color:0xff2d2d, side:THREE.DoubleSide });
+/* AR residual reflection: a faint additive, view-angle (Fresnel) tinted film + soft glint.
+   Drawn only on the lens front surface and only in render layer 1 → never on the frame. */
+const arMat = new THREE.ShaderMaterial({
+  uniforms:{ uColor:{ value:new THREE.Color(AR_COLORS.green) }, uStrength:{ value:0.4 } },
+  vertexShader:`varying vec3 vN; varying vec3 vV;
+    void main(){ vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position,1.0);
+      vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+  fragmentShader:`uniform vec3 uColor; uniform float uStrength; varying vec3 vN; varying vec3 vV;
+    void main(){ vec3 N = normalize(vN); vec3 V = normalize(vV); if (dot(N,V) < 0.0) N = -N;
+      float fres = pow(1.0 - clamp(dot(N,V),0.0,1.0), 2.2);
+      vec3 H1 = normalize(normalize(vec3(0.45,0.55,0.7)) + V), H2 = normalize(normalize(vec3(-0.5,-0.2,0.8)) + V);
+      float glint = pow(max(dot(N,H1),0.0), 70.0) + 0.6 * pow(max(dot(N,H2),0.0), 50.0);
+      gl_FragColor = vec4(uColor * uStrength * (0.012 + 0.4 * fres + 0.9 * glint), 1.0); }`,
+  transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, side:THREE.DoubleSide
+});
+const gcMat    = new THREE.MeshBasicMaterial({ color:0x38bdf8, side:THREE.DoubleSide });
+
+/* ---- Frame colour palettes (per frame family) ----
+   finish: g = glossy, m = matte, c = clear (transparent glossy acetate) */
+const METAL_BASIC = [['black','أسود','#1b1b1d'],['gray','رمادي','#6b6f76'],['silver','فضي','#c9ccd1'],
+                     ['gold','ذهبي','#d4a94a'],['rose','روز جولد','#d8a08c'],['brown','بني','#6b4a33']];
+const METAL_TREND = [['navy','كحلي','#26365a'],['champ','شامبين','#e6d3a8'],['olive','زيتي','#5e6544'],
+                     ['wine','نبيتي','#6e2633'],['bronze','برونز','#8c6239']];
+const ACE_BASIC   = [['black','أسود','#141414'],['havana','هافانا','#6a3d1e'],['brown','بني','#4a3222'],
+                     ['gray','رمادي','#5d6066'],['navy','كحلي','#1f2b4a'],['wine','نبيتي','#5a1f2a']];
+const ACE_CLEAR   = [['crystal','كريستال','#e9eef2'],['smoke','دخاني','#6d7278'],['honey','عسلي','#c8892f'],
+                     ['pink','وردي','#e8a7b5'],['blue','أزرق','#7fa8d6']];
+const ACE_TREND   = [['bottle','أخضر زيتي','#2f4a35'],['milky','بيج حليبي','#e3d6c2'],['lilac','ليلكي','#b6a2cf'],
+                     ['teal','تركواز','#2b7a78'],['red','أحمر','#a3242c']];
+const mk = (prefix, list, fin, tag) => list.map(([id, n, hex]) => ({ id:`${prefix}_${id}_${fin}`, name:`${n} ${tag}`, hex, finish:fin }));
+const PALETTES = {
+  metal: [
+    { label:'أساسي لامع', items:mk('mt', METAL_BASIC, 'g', 'لامع') },
+    { label:'أساسي مطفي', items:mk('mt', METAL_BASIC, 'm', 'مطفي') },
+    { label:'ترندي', items:mk('mt', METAL_TREND, 'g', '') }
+  ],
+  plastic: [
+    { label:'أساسي لامع', items:mk('pl', ACE_BASIC, 'g', 'لامع') },
+    { label:'أساسي مطفي', items:mk('pl', ACE_BASIC, 'm', 'مطفي') },
+    { label:'شفاف لامع', items:mk('pl', ACE_CLEAR, 'c', 'شفاف') },
+    { label:'ترندي', items:mk('pl', ACE_TREND, 'g', '') }
+  ]
+};
+const familyOf = f => f === 'plastic' ? 'plastic' : 'metal';
+const DEFAULT_SWATCH = { plastic:'pl_black_g', metal:'mt_gold_g', halfrim:'mt_gray_m', rimless:'mt_silver_g' };
+function findSwatch(id){
+  for (const fam of Object.values(PALETTES)) for (const row of fam) for (const s of row.items) if (s.id === id) return s;
+  return null;
+}
+
+function applyMaterials(){
+  const metalLike = state.frame !== 'plastic';
+  let sw = findSwatch(state.swatch);
+  if (!sw || familyOf(state.frame) !== (sw.id.startsWith('pl') ? 'plastic' : 'metal')){ state.swatch = DEFAULT_SWATCH[state.frame]; sw = findSwatch(state.swatch); }
+  const matte = sw.finish === 'm', clear = sw.finish === 'c';
+  frameMat.color.set(sw.hex);
+  frameMat.metalness = metalLike ? 1.0 : 0.0;
+  frameMat.roughness = metalLike ? (matte ? 0.55 : 0.16) : (matte ? 0.72 : 0.18);
+  frameMat.clearcoat = metalLike || matte ? 0.0 : 1.0;
+  frameMat.clearcoatRoughness = 0.05;
+  frameMat.transparent = clear;
+  frameMat.opacity = clear ? 0.5 : 1.0;
+  frameMat.depthWrite = !clear;
+  frameMat.needsUpdate = true;
+  const arc = AR_COLORS[state.ar];
+  lensMat.specularColor.set(0xffffff).lerp(new THREE.Color(arc), state.ar === 'none' ? 0 : 0.4);  // faint residual tint
+  lensMat.specularIntensity = 0.38;
+  arMat.uniforms.uColor.value.set(arc);
+  arMat.uniforms.uStrength.value = state.ar === 'none' ? 0 : 0.4;
+  arLights.forEach(l => { l.color.set(arc); l.intensity = state.ar === 'none' ? 0 : 0.35; });
+}
+
+/* =====================================================================
+   3) OPTICS MATH
+   ===================================================================== */
+// Sagitta: Sag = R - sqrt(R^2 - r^2). r is clamped just below R to avoid NaN.
+function sag(R, r){
+  if (!isFinite(R) || R <= 0) return 0;
+  const rr = Math.min(r, R * 0.999);
+  return R - Math.sqrt(R * R - rr * rr);
+}
+// Conic sag: z = c r² / (1 + sqrt(1 - (1+k) c² r²)). k=0 → exact sphere (same as Sagitta formula).
+function sagConic(R, r, k){
+  if (!k) return sag(R, r);
+  if (!isFinite(R) || R <= 0) return 0;
+  const c = 1 / R, a = Math.max(0, 1 - (1 + k) * c * c * r * r);
+  return c * r * r / (1 + Math.sqrt(a));
+}
+const DESIGNS = {
+  spheric:  { flatten:0.0, k: 0.0 },
+  aspheric: { flatten:1.5, k:-1.2 },
+  freeform: { flatten:1.0, k:-1.6 },
+  double:   { flatten:2.0, k:-2.0 }
+};
+// Base curve rule (requested): +6 for plus, +4 moderate, +2 high minus
+function pickBase(se){ return se >= 1 ? 6 : (se > -4 ? 4 : 2); }
+
+/* ---------- Frame / lens outline ----------
+   Returns CCW contour points (lens bevel APEX line) in box-centred coords, x=right, y=up. */
+/* ---------- Lens shapes ----------
+   Every shape is generated in a canonical unit space with the TEMPORAL side at +x, then:
+   1) normalised so its bounding box is exactly A × B (boxing system → geometric centre = box centre),
+   2) mirrored for the right eye (temporal = −x) with the point order reversed to stay CCW.
+   All optics (sag per edge point, decentration, bevel, rim sweep) work on these points unchanged.
+   Shapes are star-shaped from the centre (no deep concavities) so the lens surface grid stays valid. */
+const SHAPES = {
+  regular: [
+    ['rectangle','مستطيل'], ['square','مربع'], ['round','دائري'], ['oval','بيضاوي'],
+    ['hexagon','سداسي'], ['octagon','ثماني'], ['pentagon','خماسي']
+  ],
+  irregular: [
+    ['cateye','كات آي'], ['aviator','أفياتور'], ['pantos','بانتو'], ['browline','كلوب ماستر'],
+    ['butterfly','بترفلاي'], ['dframe','شكل D'], ['geometric','جيومتريك']
+  ]
+};
+const SHAPE_NAME = Object.fromEntries([...SHAPES.regular, ...SHAPES.irregular, ['custom', 'من صورة الفريم']]);
+let customPts = null;     // lens outline traced from a frame photo (canonical: temporal = +x, y up)
+let customPreview = null; // dataURL of the crop with the traced outline
+let lastTrace = null;     // photo + lens centre of the last trace (for manual editing)
+
+// polar superellipse with a different exponent per quadrant (TT = top-temporal, TN, BN, BT)
+function superQ(nTT, nTN, nBN, nBT, bump){
+  const pts = [], N = 180;
+  for (let i = 0; i < N; i++){
+    const t = (i / N) * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+    const n = s >= 0 ? (c >= 0 ? nTT : nTN) : (c < 0 ? nBN : nBT);
+    let r = 1 / Math.pow(Math.pow(Math.abs(c), n) + Math.pow(Math.abs(s), n), 1 / n);
+    if (bump) r *= bump(t);
+    pts.push(new THREE.Vector2(r * c, r * s));
+  }
+  return pts;
+}
+function polygon(V){
+  const pts = [];
+  for (let e = 0; e < V.length; e++){
+    const p = V[e], q = V[(e + 1) % V.length];
+    const steps = Math.max(6, Math.round(Math.hypot(q[0] - p[0], q[1] - p[1]) * 36));
+    for (let k = 0; k < steps; k++){ const t = k / steps; pts.push(new THREE.Vector2(p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)); }
+  }
+  return pts;
+}
+function spline(V){
+  const curve = new THREE.CatmullRomCurve3(V.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, 'centripetal');
+  return curve.getSpacedPoints(180).slice(0, 180).map(p => new THREE.Vector2(p.x, p.y));
+}
+const gauss = (t, c, w) => { let d = Math.atan2(Math.sin(t - c), Math.cos(t - c)); return Math.exp(-(d / w) * (d / w)); };
+function rawShape(shape){
+  switch (shape){
+    case 'square':   return superQ(9, 9, 9, 9);
+    case 'round':    return superQ(2, 2, 2, 2);
+    case 'oval':     return superQ(2.2, 2.2, 2.2, 2.2, t => 1 + 0.05 * Math.sin(t));
+    case 'hexagon':  return polygon([[0.5,1],[-0.5,1],[-1,0],[-0.5,-1],[0.5,-1],[1,0]]);
+    case 'octagon':  { const c = 0.3; return polygon([[1,1-c],[1-c,1],[-1+c,1],[-1,1-c],[-1,-1+c],[-1+c,-1],[1-c,-1],[1,-1+c]]); }
+    case 'pentagon': return polygon([[1,1],[-1,1],[-1,-0.25],[-0.15,-1],[1,-0.4]]);
+    case 'cateye':   return superQ(3.2, 3.6, 2.6, 2.4, t => 1 + 0.2 * gauss(t, 0.55, 0.32) - 0.06 * gauss(t, -2.2, 0.6));
+    // teardrop: straight-ish brow, deepest point toward the nose, temporal side sweeping up
+    case 'aviator':  return spline([[1,0.75],[0.4,1],[-0.45,0.97],[-0.95,0.7],[-1,0.05],[-0.8,-0.6],[-0.4,-1],[0.2,-0.9],[0.7,-0.5],[0.97,0.1]]);
+    case 'pantos':   return superQ(3.4, 3.4, 2.0, 2.0);
+    case 'browline': return superQ(7, 7, 2.3, 2.3, t => 1 + 0.04 * gauss(t, 0.4, 0.5));
+    case 'butterfly':return superQ(2.6, 3.0, 2.4, 2.6, t => 1 + 0.16 * gauss(t, 0.5, 0.35) + 0.1 * gauss(t, -0.8, 0.4) - 0.07 * gauss(t, Math.PI, 0.5));
+    case 'dframe':   return superQ(6, 9, 4, 2.2);
+    case 'geometric':return polygon([[1,0.35],[0.55,1],[-0.6,1],[-1,0.45],[-0.9,-0.5],[-0.3,-1],[0.6,-0.9]]);
+    case 'custom':   if (customPts) return spline(customPts);
+                     return superQ(4.8, 4.8, 4.8, 4.8);
+    default:         return superQ(4.8, 4.8, 4.8, 4.8);   // rectangle (sleek, ~rim n=4.8)
+  }
+}
+function makeContour(shape, a, b, sgnT = 1){
+  let pts = rawShape(shape);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const p of pts){ x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, sx = 2 * a / (x1 - x0), sy = 2 * b / (y1 - y0);
+  pts = pts.map(p => new THREE.Vector2((p.x - cx) * sx * sgnT, (p.y - cy) * sy));
+  let area = 0; for (let i = 0; i < pts.length; i++){ const p = pts[i], q = pts[(i + 1) % pts.length]; area += p.x * q.y - q.x * p.y; }
+  if (area < 0) pts.reverse();                     // keep CCW after mirroring
+  // drop near-duplicate points (spline seam) to keep miter normals clean
+  return pts.filter((p, i) => p.distanceTo(pts[(i + 1) % pts.length]) > 1e-4);
+}
+// Outward MITER normals (correct offset length at octagon corners → rim never pinches).
+function contourMiters(C){
+  const N = C.length, out = [];
+  for (let i = 0; i < N; i++){
+    const p0 = C[(i - 1 + N) % N], p1 = C[i], p2 = C[(i + 1) % N];
+    const t1 = new THREE.Vector2().subVectors(p1, p0).normalize();
+    const t2 = new THREE.Vector2().subVectors(p2, p1).normalize();
+    const n1 = new THREE.Vector2(t1.y, -t1.x), n2 = new THREE.Vector2(t2.y, -t2.x);
+    const m = new THREE.Vector2().addVectors(n1, n2).normalize();
+    const d = Math.max(m.dot(n1), 0.35);
+    out.push(m.multiplyScalar(1 / d));
+  }
+  return out;
+}
+
+/* =====================================================================
+   4) GEOMETRY BUILDERS
+   ===================================================================== */
+/* BUG FIX #1 (Geometry collapse):
+   ExtrudeGeometry + holes triangulates the face with earcut; with high curveSegments /
+   bevelSegments the hole touches the outer path and earcut silently returns 0 triangles
+   → the frame vanished. We NEVER triangulate a face with holes. Instead every part is a
+   SWEEP: a small 2D cross-section (including the V-groove) is placed at each contour point
+   and consecutive sections are stitched with quads. Index math is deterministic, every
+   quad always exists, so the mesh cannot collapse. Each profile segment gets its own
+   vertices → crisp edges between faces, smooth shading along the contour. */
+function buildSweep(rows, loopClosed, profileClosed){
+  const Ni = rows.length, M = rows[0].length;
+  const segs = profileClosed ? M : M - 1;
+  const pos = [], idx = [];
+  for (let j = 0; j < segs; j++){
+    const j2 = (j + 1) % M;
+    const base = pos.length / 3;
+    for (let i = 0; i < Ni; i++){
+      const a = rows[i][j], b = rows[i][j2];
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    }
+    const iMax = loopClosed ? Ni : Ni - 1;
+    for (let i = 0; i < iMax; i++){
+      const i2 = (i + 1) % Ni;
+      const a = base + i*2, b = base + i*2 + 1, c = base + i2*2, d = base + i2*2 + 1;
+      idx.push(a, c, b,  b, c, d);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+// Polar-grid cap for a lens surface (rings scaled from the shoulder contour → follows any shape)
+function buildCap(S, zfun, K, flip){
+  const N = S.length, pos = [], idx = [];
+  pos.push(0, 0, zfun(0, 0));
+  for (let k = 1; k <= K; k++){
+    const f = k / K;
+    for (let i = 0; i < N; i++){
+      const x = S[i].x * f, y = S[i].y * f;
+      pos.push(x, y, zfun(x, y));
+    }
+  }
+  const tri = (a, b, c) => flip ? idx.push(a, c, b) : idx.push(a, b, c);
+  for (let i = 0; i < N; i++) tri(0, 1 + i, 1 + (i + 1) % N);
+  for (let k = 1; k < K; k++){
+    const r0 = 1 + (k - 1) * N, r1 = 1 + k * N;
+    for (let i = 0; i < N; i++){
+      const i2 = (i + 1) % N;
+      const a = r0 + i, b = r0 + i2, c = r1 + i, d = r1 + i2;
+      tri(a, c, d); tri(a, d, b);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+function addTube(parent, points, radius, mat, segs = 64, radial = 12){
+  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, segs, radius, radial, false), mat);
+  parent.add(m);
+  return { mesh:m, curve };
+}
+
+/* =====================================================================
+   5) ONE EYE: true meniscus lens + rim, in eye-local coords (box centre = origin)
+   ===================================================================== */
+function buildEye(eye){
+  const rx = state[eye], nIdx = state.index, type = state.frame;
+  const a = state.A / 2, b = state.B / 2;
+  const sgnT = eye === 'R' ? -1 : 1;   // temporal direction in world X (wearer's R eye is at -X when viewed from front)
+  const sgnN = -sgnT;                  // nasal direction
+  const C = makeContour(state.shape, a, b, sgnT);   // bevel apex line (shape fitted to A×B, mirrored per eye)
+  const Mt = contourMiters(C);
+  const N = C.length;
+  const fullRim = type === 'plastic' || type === 'metal';
+  const bh = fullRim ? 0.6 : 0.0;      // V-bevel height (apex sticks 0.6 mm out of the shoulders)
+  const S = C.map((p, i) => new THREE.Vector2(p.x - bh * Mt[i].x, p.y - bh * Mt[i].y)); // lens shoulders
+
+  // ---- Decentration: DecX = FramePD - MonoPD, FramePD(mono) = (A + DBL)/2 ----
+  const framePDmono = (state.A + state.DBL) / 2;
+  const mono = eye === 'R' ? state.pdR : state.pdL;
+  const dec = framePDmono - mono;               // + = inward (nasal)
+  // Vertical: customer's OC on the 2/3 rule → fitting height = B/3*2 from the lens bottom → y = -B/2 + 2B/3 = +B/6
+  // Vertical OC: on the geometric centre by default (standard SV lab practice when no fitting height is given),
+  // or the 2/3 rule (fitting height = B/3*2 from the bottom → +B/6), or a manual height.
+  const ocx = sgnN * dec, ocy = Math.max(-state.B / 2 + 2, Math.min(state.B / 2 - 2, fhFinal() - state.B / 2));
+
+  // ---- Curves ----
+  const se = rx.sph + rx.cyl / 2;
+  // Lens design: aspheric designs use a flatter base + a prolate conic (k<0) on the POWER surface
+  // (front for plus, back for minus) → flatter, thinner lens, same power at the optical centre.
+  const dz = DESIGNS[state.design] || DESIGNS.spheric;
+  const base = Math.max(0.5, pickBase(se) - dz.flatten);
+  const kF = se >= 0 ? dz.k : 0, kB = se >= 0 ? 0 : dz.k;
+  const R1 = (TOOLING_INDEX - 1) * 1000 / base;     // front radius from base curve @1.53
+  const D1 = (nIdx - 1) * 1000 / R1;                // true front surface power in lens material
+  const axisRad = rx.axis * Math.PI / 180;
+  // Power in meridian φ: F(φ) = S + C·sin²(φ − axis). Back surface = F − (effective front power).
+  // Thick-lens (vertex) correction: front power reaching the back surface = D1 / (1 − (t/n)·D1).
+  let D1eff = D1;
+  const backPow = phi => rx.sph + rx.cyl * Math.pow(Math.sin(phi - axisRad), 2) - D1eff;
+  const rel = (x, y) => {
+    const dx = x - ocx, dy = y - ocy, r = Math.hypot(dx, dy);
+    const phi = Math.atan2(dy, dx);
+    const D2 = backPow(phi);
+    const s2 = Math.abs(D2) < 1e-6 ? 0 : sagConic((nIdx - 1) * 1000 / Math.abs(D2), r, kB);
+    return { zf: -sagConic(R1, r, kF), zb: Math.sign(D2) * s2 };   // concave back (D2<0) sinks toward -Z
+  };
+
+  // ---- Centre thickness: min CT for minus, min edge for plus ----
+  // Thickness is checked on EVERY edge point (whole circumference), so sph, sph+cyl and cyl-only
+  // all change the edge all the way round according to the real power in each meridian.
+  const solveTc = () => {
+    let minG = Infinity;
+    for (const p of S){ const s = rel(p.x, p.y); minG = Math.min(minG, s.zf - s.zb); }
+    minG = Math.min(minG, 0);
+    return Math.max(TC_MIN[nIdx.toFixed(2)] ?? 1.5, (MIN_EDGE[type] ?? 1.0) - minG);
+  };
+  let tc = solveTc();
+  for (let it = 0; it < 4; it++){ D1eff = D1 / (1 - (tc / 1000 / nIdx) * D1); tc = solveTc(); }
+
+  const zFront = (x, y) => rel(x, y).zf;          // lens apex at OC is exactly Z = 0
+  const zBack  = (x, y) => rel(x, y).zb - tc;
+
+  /* BUG FIX #2 (Flush fit):
+     Front surface is defined as z = -Sag(R1, r) → the absolute frontmost point (OC apex) sits at Z=0.
+     The rim front face is built AT the lens front edge height zf_i of every contour point, i.e. the
+     frame front tracks the lens front curve exactly (like a real auto-edger tracing the frame curve).
+     Nothing of the lens is in front of the rim; all extra thickness is generated toward -Z (back). */
+  const zf = [], zb = [], eT = [], zA = [], bwf = [], bwb = [];
+  for (let i = 0; i < N; i++){
+    const f = zFront(S[i].x, S[i].y), k = zBack(S[i].x, S[i].y);
+    const t = f - k;
+    zf.push(f); zb.push(k); eT.push(t);
+    zA.push(f - t / 3);                                 // V-bevel apex at 1/3 from the front (1/3–2/3 rule)
+    bwf.push(Math.min(0.9, (t / 3) * 0.85));
+    bwb.push(Math.min(0.9, (2 * t / 3) * 0.85));
+  }
+
+  const group = new THREE.Group();
+  const P = (v2, n, i, z) => new THREE.Vector3(v2.x + n * Mt[i].x, v2.y + n * Mt[i].y, z);
+
+  // ---- Lens surfaces (layer 1) ----
+  const K = 28;
+  const front = new THREE.Mesh(buildCap(S, zFront, K, false), lensMat);
+  const back  = new THREE.Mesh(buildCap(S, zBack,  K, true ), lensMat);
+  const edgeRows = [];
+  for (let i = 0; i < N; i++){
+    if (fullRim){
+      edgeRows.push([
+        P(S[i], 0, i, zf[i]),
+        P(S[i], 0, i, zA[i] + bwf[i]),
+        P(C[i], 0, i, zA[i]),                 // bevel apex
+        P(S[i], 0, i, zA[i] - bwb[i]),
+        P(S[i], 0, i, zb[i])
+      ]);
+    } else {
+      edgeRows.push([ P(C[i], 0, i, zf[i]), P(C[i], 0, i, zb[i]) ]); // flat (polished) edge
+    }
+  }
+  const edge = new THREE.Mesh(buildSweep(edgeRows, true, false), edgeMat);
+  const arFilm = new THREE.Mesh(front.geometry, arMat); arFilm.renderOrder = 3;   // AR sheen on the lens only
+  [front, back, edge, arFilm].forEach(m => { m.layers.set(1); if (m !== arFilm) m.renderOrder = 2; group.add(m); });
+
+  // ---- Markers: geometric (boxing) centre = always middle of the lens box; customer OC next to it ----
+  const marker = (x, y, mat, ringR, arm) => {
+    const z = zFront(x, y) + 0.12;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(ringR * 0.6, ringR, 28), mat); ring.position.set(x, y, z);
+    const h = new THREE.Mesh(new THREE.PlaneGeometry(arm, 0.22), mat); h.position.copy(ring.position);
+    const v = new THREE.Mesh(new THREE.PlaneGeometry(0.22, arm), mat); v.position.copy(ring.position);
+    [ring, h, v].forEach(m => { m.userData.marker = true; markerMeshes.push(m); });
+    group.add(ring, h, v);
+  };
+  if (state.showGC && !fsOn) marker(0, 0, gcMat, 1.1, 6);          // geometric centre (A/2, B/2)
+  if (state.showOC && !fsOn) marker(ocx, ocy, ocMat, 0.95, 5);      // customer optical centre (hidden in full screen)
+
+  // ---- Rim ----
+  const rimW = type === 'plastic' ? 2.2 : (type === 'metal' ? 1.5 : 1.6);   // half-rim: slim metal top wire
+  const baseD = state.depth;                          // user-controlled frame depth (عمق الإطار)
+  const ch = type === 'plastic' ? 0.5 : 0.4;
+  const nIn = fullRim ? -bh + 0.05 : 0.02;           // inner face 0.05 mm clear of the lens shoulder
+  const nOut = nIn + rimW;
+  const rimBackZ = new Array(N).fill(null);
+
+  if (state.showFrame && fullRim){
+    const rows = [];
+    for (let i = 0; i < N; i++){
+      const zF = zf[i];
+      const D = Math.max(baseD, (zF - zA[i]) + bwb[i] + 0.7);   // rim always deep enough to hold the groove
+      const zB = zF - D; rimBackZ[i] = zB;
+      rows.push([
+        P(C[i], nIn, i, zF), P(C[i], nOut - ch, i, zF), P(C[i], nOut, i, zF - ch),
+        P(C[i], nOut, i, zB + ch), P(C[i], nOut - ch, i, zB), P(C[i], nIn, i, zB),
+        P(C[i], nIn, i, zA[i] - bwb[i]),
+        P(C[i], 0.08, i, zA[i]),                // groove bottom (0.08 mm clearance to bevel apex)
+        P(C[i], nIn, i, zA[i] + bwf[i])
+      ]);
+    }
+    group.add(new THREE.Mesh(buildSweep(rows, true, true), frameMat));
+  }
+
+  if (state.showFrame && type === 'halfrim'){
+    // Upper bar = contiguous range with y >= -0.25b (open sweep). Lower = nylon line.
+    const mask = C.map(p => p.y >= 0.1 * b);   // real half-rims cover the top and stop around hinge / pad height
+    let start = 0; for (let i = 0; i < N; i++){ if (mask[i] && !mask[(i - 1 + N) % N]){ start = i; break; } }
+    const upper = [], lower = [];
+    for (let k = 0; k < N; k++){ const i = (start + k) % N; (mask[i] ? upper : lower).push(i); }
+    const rows = upper.map(i => {
+      // Bar depth = the depth you set (no auto-thickening). It straddles the lens groove (1/3 from the front) but
+      // never sticks out in front of the lens; any lens thickness behind the bar is the real back protrusion.
+      const D = baseD, zF = Math.min(zf[i], zA[i] + D / 2), zB = zF - D; rimBackZ[i] = zB;
+      return [ P(C[i], nIn, i, zF), P(C[i], nOut - ch, i, zF), P(C[i], nOut, i, zF - ch),
+               P(C[i], nOut, i, zB + ch), P(C[i], nOut - ch, i, zB), P(C[i], nIn, i, zB) ];
+    });
+    group.add(new THREE.Mesh(buildSweep(rows, false, true), frameMat));
+    const ny = [upper[upper.length - 1], ...lower, upper[0]].map(i => P(C[i], 0.15, i, zA[i]));
+    addTube(group, ny, 0.32, nylonMat, 120, 8);
+  }
+
+  // ---- Key indices ----
+  const argmax = f => { let bi = 0, bv = -Infinity; for (let i = 0; i < N; i++){ const v = f(C[i]); if (v > bv){ bv = v; bi = i; } } return bi; };
+  const iT = argmax(p => sgnT * p.x - 0.002 * Math.abs(p.y));         // temporal, horizontal meridian
+  const iN = argmax(p => sgnN * p.x - 0.002 * Math.abs(p.y));         // nasal
+  const iHinge = argmax(p => sgnT * p.x * 0.85 + p.y * 0.5);
+  // Bridge: plastic → upper nasal (moulded bridge). Metal / half-rim / rimless → on the nasal side
+  // ~4 mm above the pad-arm attachment (pads sit at ~0.12·b), not at the top of the lens.
+  // Bridge position on the nasal rim
+  const iBridge = type === 'plastic'
+    ? argmax(p => sgnN * p.x - 1.2 * Math.abs(p.y - (b - 8)))   // plastic: bridge ~8 mm below the top of the lens
+    : argmax(p => sgnN * p.x - 0.6 * Math.abs(p.y - (0.12 * b + 4.0)));
+  const iPad = argmax(p => sgnN * p.x - 0.6 * Math.abs(p.y - 0.12 * b));   // nasal side, just above mid-height
+
+  const mid = i => (zf[i] + zb[i]) / 2;
+  const pts = fullRim || type === 'halfrim'
+    ? {
+        hinge: P(C[iHinge], nOut, iHinge, zf[iHinge] - Math.max(baseD, 2) * 0.5),
+        bridge: P(C[iBridge], fullRim ? nIn + rimW * 0.6 : nOut * 0.6, iBridge, zf[iBridge] - 1.0),
+        pad: P(C[iPad], fullRim ? nIn + rimW * 0.5 : 0.1, iPad, (fullRim ? zf[iPad] - baseD * 0.6 : mid(iPad)))
+      }
+    : { hinge: P(C[iHinge], 0, iHinge, mid(iHinge)), bridge: P(C[iBridge], 0, iBridge, mid(iBridge)), pad: P(C[iPad], 0, iPad, mid(iPad)) };
+
+  // ---- Stats ----
+  // temporal protrusion point: the horizontal temporal edge, or (half-rim) the temporal end of the top bar
+  let iPT = iT;
+  if (rimBackZ[iT] === null){ let bv = -Infinity; for (let i = 0; i < N; i++) if (rimBackZ[i] !== null){ const v = sgnT * C[i].x - 0.3 * Math.abs(C[i].y); if (v > bv){ bv = v; iPT = i; } } }
+  let eMax = -Infinity, eMin = Infinity, deepest = 0, protMax = 0;
+  for (let i = 0; i < N; i++){
+    eMax = Math.max(eMax, eT[i]); eMin = Math.min(eMin, eT[i]);
+    deepest = Math.max(deepest, -zb[i]);
+    if (rimBackZ[i] !== null) protMax = Math.max(protMax, rimBackZ[i] - zb[i]);
+  }
+  const pMer1 = rx.sph, pMer2 = rx.sph + rx.cyl;
+  const R2of = p => { const D2 = p - D1eff; return Math.abs(D2) < 1e-6 ? Infinity : (nIdx - 1) * 1000 / D2; };
+  const stats = {
+    base, R1, D1, R2a:R2of(pMer1), R2b:R2of(pMer2), tc, dec,
+    eT:eT[iT], eN:eT[iN], eMax, eMin,
+    apexT: eT[iT] / 3,
+    lensDepth: deepest,
+    frameDepthT: rimBackZ[iPT] !== null ? -rimBackZ[iPT] : null,
+    protT: rimBackZ[iPT] !== null ? Math.max(0, rimBackZ[iPT] - zb[iPT]) : null,
+    protMax: state.showFrame && type !== 'rimless' ? protMax : null
+  };
+  return { group, pts, stats, sgnT, sgnN };
+}
+
+/* =====================================================================
+   6) ASSEMBLY: wrap, bridge, temples, pads
+   ===================================================================== */
+function buildFrameHardware(root, eyes){
+  const type = state.frame, plastic = type === 'plastic';
+  const toW = (e, v) => e.group.localToWorld(v.clone());
+
+  // Bridge
+  const bR = toW(eyes.R, eyes.R.pts.bridge), bL = toW(eyes.L, eyes.L.pts.bridge);
+  const bm = bR.clone().add(bL).multiplyScalar(0.5); bm.y += plastic ? 1.2 : 3.0; bm.z += 0.6;
+  addTube(root, [bR, bm, bL], plastic ? 1.7 : 0.85, frameMat, 48, 14);
+
+  for (const k of ['R', 'L']){
+    const e = eyes[k], s = e.sgnT;
+    const h = toW(e, e.pts.hinge);
+    /* BUG FIX #3 (Temple flipping) + Wrap independence:
+       Temples are NOT children of the wrapped eye group and are NOT mirrored with scale.x=-1.
+       Each temple is built in WORLD space from the hinge's world position, running straight
+       along -Z. The drop-tip offsets use NEGATIVE Y for both sides, so both earpieces bend down,
+       and the temples stay parallel to the head whatever the wrap angle is. */
+    const start = new THREE.Vector3(h.x + s * (plastic ? 1.0 : 1.6), h.y, h.z - (plastic ? 3.5 : 4.5));
+    addTube(root, [h, new THREE.Vector3(h.x + s * 0.9, h.y, h.z - 1.4), start], plastic ? 1.6 : 0.85, frameMat, 16, 12);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(plastic ? 1.0 : 0.85, plastic ? 1.0 : 0.85, plastic ? 5 : 3.6, 16), hingeMat);
+    barrel.position.copy(start); root.add(barrel);
+
+    const off = (dy, dz) => new THREE.Vector3(start.x, start.y + dy, start.z + dz);
+    const temple = [ start, off(0, -35), off(-0.6, -90), off(-3.5, -108), off(-11, -121), off(-20, -130) ];
+    const { curve } = addTube(root, temple, plastic ? 1.5 : 0.8, frameMat, 160, 12);
+    if (!plastic){
+      const tip = []; for (let t = 0.74; t <= 1.0001; t += 0.02) tip.push(curve.getPoint(Math.min(t, 1)));
+      addTube(root, tip, 1.25, tipMat, 40, 12);
+    }
+
+    if (!plastic){ // nose pads + pad arms
+      const p = toW(e, e.pts.pad), n = e.sgnN;
+      // Pad sits behind the nasal rim at mid / upper-mid lens height, angled to rest on the nose
+      const pad = new THREE.Vector3(p.x + n * 2.6, p.y - 2.5, p.z - 6.5);
+      addTube(root, [p, new THREE.Vector3(p.x + n * 1.2, p.y - 0.4, p.z - 2.8), pad.clone().add(new THREE.Vector3(-n * 0.3, 1.6, 0.9))], 0.4, hingeMat, 16, 8);
+      const padMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 18, 12), padMat);
+      padMesh.scale.set(1.4, 4.2, 0.8); padMesh.position.copy(pad);
+      padMesh.rotation.set(0.15, n * 0.65, -n * 0.25);
+      root.add(padMesh);
+    }
+  }
+}
+
+/* =====================================================================
+   7) SAFE REBUILD (old model stays on screen if anything fails)
+   ===================================================================== */
+let root = null, needsRebuild = true, lastStats = null;
+function disposeTree(o){ o.traverse(c => { if (c.geometry) c.geometry.dispose(); }); }
+function validate(o){
+  o.traverse(c => {
+    if (!c.geometry) return;
+    const p = c.geometry.attributes.position;
+    if (!p || p.count === 0) throw new Error('empty geometry');
+    const arr = p.array; for (let i = 0; i < arr.length; i++) if (!isFinite(arr[i])) throw new Error('NaN in geometry');
+  });
+}
+function rebuild(){
+  markerMeshes = [];
+  const newRoot = new THREE.Group();
+  const eyes = {};
+  /* Pantoscopic tilt: the whole front rotates about a horizontal axis through the TOP of the lenses
+     (top edge stays put, the lower rim swings toward the cheeks = −Z). Temples are built later in world space
+     from the hinge positions, so they stay level. Lens thickness / optics are not changed by this. */
+  const front = new THREE.Group();
+  const topY = state.B / 2;
+  front.position.set(0, topY, 0);
+  front.rotation.x = THREE.MathUtils.degToRad(state.panto);
+  newRoot.add(front);
+  for (const k of ['R', 'L']){
+    const e = buildEye(k); eyes[k] = e;
+    const pivot = new THREE.Group();                 // wrap pivots on the NASAL edge so the bridge stays put
+    pivot.position.set(e.sgnT * state.DBL / 2, -topY, 0);
+    pivot.rotation.y = e.sgnT * THREE.MathUtils.degToRad(state.wrap); // temporal side swings back (-Z)
+    e.group.position.x = e.sgnT * state.A / 2;
+    pivot.add(e.group); front.add(pivot);
+  }
+  newRoot.updateMatrixWorld(true);
+  if (state.showFrame) buildFrameHardware(newRoot, eyes);
+  validate(newRoot);
+  if (root){ scene.remove(root); disposeTree(root); }
+  root = newRoot; scene.add(root);
+  lastStats = { R:eyes.R.stats, L:eyes.L.stats };
+  refreshers.forEach(f => f());
+  renderStats();
+  hideErr();
+}
+function requestRebuild(){ applyMaterials(); needsRebuild = true; }
+
+/* =====================================================================
+   8) CAMERA VIEWS (safe radius ≈ 215 mm)
+   ===================================================================== */
+const TARGET = new THREE.Vector3(0, -2, -30);
+const RADIUS = 215;
+const VIEWS = {
+  front: new THREE.Vector3(0, 0, 1),
+  side:  new THREE.Vector3(1, 0.04, 0),
+  top:   new THREE.Vector3(0, 1, 0.02),
+  iso:   new THREE.Vector3(0.62, 0.32, 0.72),
+  back:  new THREE.Vector3(0, 0.12, -1)
+};
+let tween = null;
+function goView(name, instant = false){
+  const to = TARGET.clone().add(VIEWS[name].clone().normalize().multiplyScalar(RADIUS));
+  if (instant){ camera.position.copy(to); controls.target.copy(TARGET); controls.update(); tween = null; return; }
+  tween = { from:camera.position.clone(), fromT:controls.target.clone(), to, toT:TARGET.clone(), t0:performance.now(), dur:650 };
+}
+// Full-screen preview: only the 3D model + a translucent protrusion box
+function setFS(on){
+  fsOn = on;
+  markerMeshes.forEach(m => { m.visible = !on; }); document.body.classList.toggle('fs', on);
+  document.getElementById('fsBtn').textContent = on ? '✕' : '⛶'; document.getElementById('fsBtn').title = on ? 'خروج' : 'ملء الشاشة';
+  requestRebuild(); setTimeout(resize, 50);
+}
+document.getElementById('fsBtn').addEventListener('click', () => {
+  // In-page full screen only (no browser Fullscreen API) → Chrome's "To exit full screen…" notice never appears
+  setFS(!fsOn);
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fsOn) setFS(false); });
+// frame show/hide toggle beside the view buttons (kept in sync with the checkbox in the panel)
+function refreshFrameTgl(){ const t = document.getElementById('frameTgl'); if (t){ t.classList.toggle('off', !state.showFrame); t.classList.toggle('on', state.showFrame); } }
+document.getElementById('frameTgl').addEventListener('click', () => { state.showFrame = !state.showFrame; syncUI(); requestRebuild(); });
+/* Turntable: the frame turns slowly clockwise (seen from above), like on a rotating display stand */
+let spinning = false;
+function setSpin(on){
+  spinning = on; controls.autoRotate = on; controls.autoRotateSpeed = -7.5;   // negative = clockwise turntable (~8 s per turn)
+  document.getElementById('spinBtn').classList.toggle('on', on);
+  if (on){ document.querySelectorAll('.views button[data-view]').forEach(x => x.classList.remove('on')); goView('iso'); }
+}
+document.getElementById('spinBtn').addEventListener('click', () => setSpin(!spinning));
+controls.addEventListener('start', () => { if (spinning) setSpin(false); });   // touching the model stops the spin
+document.querySelectorAll('.views button[data-view]').forEach(b => b.addEventListener('click', () => {
+  if (spinning) setSpin(false);
+  document.querySelectorAll('.views button[data-view]').forEach(x => x.classList.toggle('on', x === b));
+  goView(b.dataset.view);
+}));
+
+/* =====================================================================
+   9) UI  — every value = slider + dropdown, kept in sync
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const sgn = v => (v > 0 ? '+' : '') + v.toFixed(2);
+const mm = v => v.toFixed(1);
+const FRAME_DEPTHS = { plastic:3.5, metal:2.5, halfrim:3.0, rimless:3.0 };
+const INDEXES = [1.50, 1.56, 1.60, 1.67, 1.74];
+const range = (a, b, st) => { const out = []; for (let v = a; v <= b + 1e-9; v += st) out.push(Math.round(v * 100) / 100); return out; };
+
+function fillSelect(sel, values, fmt){ sel.innerHTML = values.map(v => `<option value="${v.toFixed(2)}">${fmt(v)}</option>`).join(''); }
+fillSelect($('pd'), range(40, 90, 0.5), mm);
+fillSelect($('pdR'), range(20, 45, 0.5), mm);
+fillSelect($('pdL'), range(20, 45, 0.5), mm);
+
+const refreshers = [];
+// Generic control: [label] [slider] [dropdown]. Both drive the same list of allowed values.
+function makeCtrl(container, label, values, fmt, get, set, id){
+  const row = document.createElement('div'); row.className = 'ctrl'; if (id) row.id = id;
+  const [ar, en] = label.split('|');
+  row.innerHTML = `<div class="lh"><span class="ar">${ar}</span><span class="en">${en || ''}</span></div>
+    <div class="body"><input type="range" min="0" max="${values.length - 1}" step="1"><select></select></div>`;
+  container.appendChild(row);
+  const rg = row.querySelector('input'), sel = row.querySelector('select');
+  sel.innerHTML = values.map((v, i) => `<option value="${i}">${fmt(v)}</option>`).join('');
+  const nearest = v => { let bi = 0, bd = Infinity; values.forEach((x, i) => { const d = Math.abs(x - v); if (d < bd){ bd = d; bi = i; } }); return bi; };
+  const refresh = () => { const i = nearest(get()); rg.value = i; sel.value = i; };
+  const apply = i => { set(values[i]); rg.value = i; sel.value = i; refreshers.forEach(f => f()); requestRebuild(); };
+  rg.addEventListener('input', () => apply(+rg.value));
+  sel.addEventListener('change', () => apply(+sel.value));
+  refreshers.push(refresh); refresh();
+  return row;
+}
+// Button group (2-column grid)
+function makeBtns(container, options, get, set){
+  container.innerHTML = '';
+  const btns = options.map(([v, label]) => {
+    const b = document.createElement('button'); b.className = 'gbtn'; b.textContent = label;
+    b.addEventListener('click', () => { set(v); refresh(); requestRebuild(); });
+    container.appendChild(b); return [v, b];
+  });
+  const refresh = () => btns.forEach(([v, b]) => b.classList.toggle('on', v === get()));
+  refreshers.push(refresh); refresh();
+}
+
+for (const eye of ['R', 'L']){
+  const box = $(eye === 'R' ? 'eyeR' : 'eyeL');
+  makeCtrl(box, 'كروي|SPH', range(-12, 10, 0.25), sgn, () => state[eye].sph, v => state[eye].sph = v);
+  makeCtrl(box, 'أسطواني|CYL', range(-6, 0, 0.25), sgn, () => state[eye].cyl, v => state[eye].cyl = v);
+  makeCtrl(box, 'المحور|AXIS', range(0, 180, 1), v => v.toFixed(0) + '°', () => state[eye].axis, v => state[eye].axis = v);
+}
+const ocRow = makeCtrl($('ocCtrl'), 'ارتفاع عين العميل مم|Final   ·   FH', range(10, 45, 0.5), v => v.toFixed(1),
+  () => fhMeasured(), v => { state.ocMode = 'manual'; state.ocManual = v - state.B / 2; });
+// Final box: FH after the pantoscopic-tilt correction (−1 mm per 2°) used for the optical centre
+ocRow.classList.add('has-fh');
+const fhBox = document.createElement('div'); fhBox.className = 'fh'; fhBox.title = 'الارتفاع النهائي بعد تصحيح البانتو';
+ocRow.querySelector('.body').appendChild(fhBox);
+const refreshFH = () => {
+  const d = pantoDrop();
+  fhBox.innerHTML = `<b>${fhFinal().toFixed(1)}</b><small>${d ? '−' + d.toFixed(1) + ' panto' : 'FINAL mm'}</small>`;
+};
+refreshers.push(refreshFH); refreshFH();
+makeBtns($('ocBtns'), [['center', 'GC · Geometric Center'], ['twothirds', 'FH · 2/3 Rule']],
+  () => state.ocMode, v => { state.ocMode = v; syncUI(); });
+makeCtrl($('lensCtrls'), 'معامل الانكسار|Index', INDEXES, v => v.toFixed(2), () => state.index, v => state.index = v);
+makeBtns($('designBtns'), [['aspheric', 'Aspheric'], ['spheric', 'Spheric'], ['freeform', 'FreeForm'], ['double', 'Double Aspheric']],
+  () => state.design, v => state.design = v);
+makeBtns($('frameBtns'), [['metal', 'Metal'], ['rimless', 'Rimless'], ['halfrim', 'Half-Rim'], ['plastic', 'Plastic']],
+  () => state.frame, v => {
+    const famChanged = familyOf(v) !== familyOf(state.frame);
+    state.frame = v; state.depth = FRAME_DEPTHS[v];
+    if (famChanged || !findSwatch(state.swatch)) state.swatch = DEFAULT_SWATCH[v];
+    syncUI();
+  });
+
+// Colour swatches: small dots in rows (basic glossy / basic matte / clear / trendy) per frame family
+let swFamily = null;
+// Lens shape picker: tabs (regular / irregular) → icon row drawn from the SAME contour generator
+let shTab = null;
+function shapeIcon(id){
+  const pts = makeContour(id, 15, 10.5, 1);
+  return `<svg viewBox="-17 -12.5 34 25" width="34" height="25"><path d="${pts.map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + (-p.y).toFixed(2)).join(' ')}Z"
+    fill="rgba(163,230,53,.12)" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+function renderShapes(){
+  const box = $('shapes'), groups = [['photo', '📷 من صورة'], ['irregular', 'غير منتظم'], ['regular', 'منتظم']];
+  if (shTab === null) shTab = state.shape === 'custom' ? 'photo' : SHAPES.irregular.some(([id]) => id === state.shape) ? 'irregular' : 'regular';
+  let row = '';
+  if (shTab === 'photo'){
+    row = `<div class="sh-row sh-photo">
+      ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
+      ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
+      ${customPts ? `<button class="sh ${state.shape === 'custom' ? 'on' : ''}" data-sh="custom" title="من صورة الفريم">${shapeIcon('custom')}</button>` : ''}
+      <div class="sh-btns">
+        <label class="sh-up">📷 كاميرا<input type="file" id="frameCam" accept="image/*" capture="environment"></label>
+        <label class="sh-up alt">🖼️ من الاستديو<input type="file" id="framePhoto" accept="image/*"></label>
+      </div>
+      <div class="sh-note" id="shNote">حط الفريم على ورقة بيضا، وصوّره من فوق بالظبط والموبايل موازي له، والفريم ماليّ الصورة</div></div>`;
+  } else if (shTab){
+    row = `<div class="sh-row">${SHAPES[shTab].map(([id, n]) => `<button class="sh ${id === state.shape ? 'on' : ''}" data-sh="${id}" title="${n}">${shapeIcon(id)}</button>`).join('')}</div>`;
+  }
+  box.innerHTML = `<div class="sw-tabs">${groups.map(([g, l]) => `<button class="sw-tab ${g === shTab ? 'on' : ''}" data-g="${g}">${l}</button>`).join('')}</div>${row}`;
+  box.querySelectorAll('.sw-tab').forEach(b => b.addEventListener('click', () => { shTab = shTab === b.dataset.g ? '' : b.dataset.g; renderShapes(); }));
+  box.querySelectorAll('.sh').forEach(b => b.addEventListener('click', () => { state.shape = b.dataset.sh; renderShapes(); requestRebuild(); }));
+  const et = $('editTrace'); if (et) et.addEventListener('click', openTraceEditor);
+  ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
+  $('shName').textContent = SHAPE_NAME[state.shape] || '';
+}
+
+/* Frame photo → lens outline. Claude returns 36 radii (polar, from the lens box centre) for the lens on the
+   IMAGE RIGHT (= wearer's left eye, temporal side at +x = our canonical orientation) plus the box aspect.
+   The outline only replaces the contour points; it is then fitted to A × B like every other shape,
+   so the optics (sag, decentration, bevel, protrusion) are untouched. */
+const FRAME_PROMPT = `This photo shows a pair of eyeglass frames seen from the front (often lying flat on a table).
+Find the lens opening on the RIGHT side of the IMAGE (the right eye-wire / lens).
+Return the bounding box of the INNER edge of that lens opening (where the lens meets the rim), as fractions of image width/height (0..1, origin top-left).
+Also choose which of these shapes that lens is closest to: rectangle, square, round, oval, hexagon, octagon, pentagon, cateye, aviator, pantos, browline, butterfly, dframe, geometric.
+Return ONLY JSON: {"x0":number,"y0":number,"x1":number,"y1":number,"shape":string}`;
+
+/* Precise tracing, done in the page: Claude only locates the lens box; then rays are cast from the box centre
+   every 5° and the first strong colour change (the rim) is taken as the lens edge. Ray-casting from the centre
+   also guarantees a star-shaped outline, which the lens-surface grid needs. */
+async function loadImageData(file, maxSide = 1100){
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  const ctx = cv.getContext('2d', { willReadFrequently:true }); ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
+  return { cv, ctx, data:ctx.getImageData(0, 0, cv.width, cv.height) };
+}
+function traceLens(img, box){
+  const { data, cv } = img, W = cv.width, H = cv.height, px = data.data;
+  const cx = (box.x0 + box.x1) / 2 * W, cy = (box.y0 + box.y1) / 2 * H;
+  const hw = Math.abs(box.x1 - box.x0) / 2 * W, hh = Math.abs(box.y1 - box.y0) / 2 * H;
+  const at = (x, y) => {   // 3×3 averaged colour
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++){
+      const X = Math.min(W - 1, Math.max(0, Math.round(x + dx))), Y = Math.min(H - 1, Math.max(0, Math.round(y + dy)));
+      const i = (Y * W + X) * 4; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+    }
+    return [r / n, g / n, b / n];
+  };
+  // interior reference colour (what is seen through the lens opening)
+  let ref = [0, 0, 0], m = 0;
+  for (let k = 0; k < 40; k++){ const t = k / 40 * Math.PI * 2; const c = at(cx + Math.cos(t) * hw * 0.3, cy + Math.sin(t) * hh * 0.3); ref = ref.map((v, j) => v + c[j]); m++; }
+  ref = ref.map(v => v / m);
+  const dist = c => Math.hypot(c[0] - ref[0], c[1] - ref[1], c[2] - ref[2]);
+  // Each ray collects edge candidates from two detectors: (a) start of a run that differs from the interior colour,
+  // (b) local peaks of the colour gradient. Temples, printed logos, reflections and paper edges add false candidates.
+  const N = 144, cands = [], expect = [];   // one ray every 2.5° so corners are sampled
+  for (let k = 0; k < N; k++){
+    const t = k / N * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
+    const e = 1 / Math.sqrt((c / hw) ** 2 + (s / hh) ** 2);           // expected radius from the box
+    const t0 = 0.45 * e, t1 = 1.4 * e, prof = [], cols = [];
+    for (let r = t0; r <= t1; r += 1){ const col = at(cx + c * r, cy - s * r); cols.push(col); prof.push(dist(col)); }
+    const peak = Math.max(...prof), thr = Math.max(28, 0.45 * peak), list = [];
+    for (let i = 0; i < prof.length - 2; i++){
+      if (prof[i] > thr && prof[i + 1] > thr && prof[i + 2] > thr && (i === 0 || prof[i - 1] <= thr)) list.push(t0 + i);
+    }
+    const g = cols.map((col, i) => i + 2 < cols.length ? Math.hypot(cols[i + 2][0] - col[0], cols[i + 2][1] - col[1], cols[i + 2][2] - col[2]) : 0);
+    const gmax = Math.max(...g), gthr = Math.max(18, 0.35 * gmax);
+    for (let i = 1; i < g.length - 1; i++) if (g[i] > gthr && g[i] >= g[i - 1] && g[i] >= g[i + 1]) list.push(t0 + i + 1);
+    cands.push(list); expect.push(e);
+  }
+  /* Robust smooth fit: the outline is modelled as a Fourier series r(θ) = a0 + Σ (am cos mθ + bm sin mθ).
+     Coarse-to-fine (few harmonics first, more later); on every pass each ray takes the candidate nearest the current
+     curve, far candidates are ignored and near ones are Cauchy-weighted. Isolated wrong edges (temple lines, text,
+     glare) can't bend a smooth curve, so they drop out as outliers. */
+  const TH = Array.from({ length:N }, (_, k) => k / N * Math.PI * 2);
+  const fitF = (rs, ws, M) => {
+    const P = 2 * M + 1, A = Array.from({ length:P }, () => new Float64Array(P + 1));
+    const basis = th => { const v = [1]; for (let m = 1; m <= M; m++){ v.push(Math.cos(m * th), Math.sin(m * th)); } return v; };
+    for (let k = 0; k < N; k++){ if (!ws[k]) continue; const v = basis(TH[k]);
+      for (let i = 0; i < P; i++){ for (let j = 0; j < P; j++) A[i][j] += ws[k] * v[i] * v[j]; A[i][P] += ws[k] * v[i] * rs[k]; } }
+    for (let i = 1; i < P; i++){ const m = Math.ceil(i / 2); A[i][i] += 0.00002 * m ** 4 * N; }   // smoothness penalty on high harmonics
+    A[0][0] += 1e-9;
+    for (let i = 0; i < P; i++){   // Gauss-Jordan
+      let piv = i; for (let r = i + 1; r < P; r++) if (Math.abs(A[r][i]) > Math.abs(A[piv][i])) piv = r;
+      [A[i], A[piv]] = [A[piv], A[i]];
+      const d = A[i][i] || 1e-12; for (let j = i; j <= P; j++) A[i][j] /= d;
+      for (let r = 0; r < P; r++) if (r !== i){ const f = A[r][i]; if (f) for (let j = i; j <= P; j++) A[r][j] -= f * A[i][j]; }
+    }
+    const coef = A.map(row => row[P]);
+    return TH.map(th => basis(th).reduce((acc, v, i) => acc + v * coef[i], 0));
+  };
+  const scale = expect.reduce((a, b) => a + b, 0) / N;
+  let curve = expect.map(e => e / scale), inl = 0;
+  const plan = [[2, 0.35], [3, 0.3], [4, 0.25], [5, 0.2], [6, 0.15], [7, 0.12], [8, 0.1], [8, 0.08]];
+  for (const [M, tol] of plan){
+    const rs = new Array(N).fill(0), ws = new Array(N).fill(0); inl = 0;
+    for (let k = 0; k < N; k++){
+      let best = null, bd = Infinity;
+      for (const r of cands[k]){ const d = Math.abs(r / scale - curve[k]) / curve[k]; if (d < bd){ bd = d; best = r / scale; } }
+      if (best !== null && bd < tol){ rs[k] = best; ws[k] = 1 / (1 + (bd / 0.04) ** 2); inl++; }
+    }
+    if (inl < 14) break;
+    curve = fitF(rs, ws, M);
+  }
+  const quality = inl / N;
+  /* Lens outlines are convex. Take every ray's real edge point that lies near the smooth guide curve (outliers such
+     as temple lines inside the lens, logos and glare are already rejected), then wrap them in a CONVEX HULL:
+     straight sides stay straight and corners stay sharp, with no pixel jitter. If the hull simplifies to 4–10
+     sides, it is rebuilt as a clean polygon with slightly rounded corners (real cut lenses are never razor sharp). */
+  const raw = [];
+  for (let k = 0; k < N; k++){
+    let best = null, bd = Infinity;
+    for (const r of cands[k]){ const d = Math.abs(r / scale - curve[k]) / curve[k]; if (d < bd){ bd = d; best = r; } }
+    const r = best !== null && bd < 0.06 ? best : curve[k] * scale;
+    raw.push([r * Math.cos(TH[k]), r * Math.sin(TH[k])]);
+  }
+  const hull = (() => {
+    const P = raw.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [], up = [];
+    for (const p of P){ while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    for (let i = P.length - 1; i >= 0; i--){ const p = P[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    up.pop(); lo.pop(); return lo.concat(up);   // CCW
+  })();
+  const segDist = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9;
+    let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2; t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
+  // densify the hull, then Douglas–Peucker to find its real corners
+  const dense = [];
+  for (let i = 0; i < hull.length; i++){ const a = hull[i], b = hull[(i + 1) % hull.length], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (scale * 0.01)));
+    for (let k = 0; k < n; k++) dense.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); }
+  let i0 = 0, far = -1; dense.forEach(([x, y], i) => { const d = x * x + y * y; if (d > far){ far = d; i0 = i; } });
+  const D = dense.slice(i0).concat(dense.slice(0, i0)); D.push(D[0]);
+  const rdp = (a, b, eps, keep) => { let md = 0, mi = -1; for (let i = a + 1; i < b; i++){ const d = segDist(D[i], D[a], D[b]); if (d > md){ md = d; mi = i; } }
+    if (md > eps){ rdp(a, mi, eps, keep); keep.push(mi); rdp(mi, b, eps, keep); } };
+  const keep = [0]; rdp(0, D.length - 1, 0.018 * scale, keep); keep.sort((a, b) => a - b);
+  const V = keep.map(i => D[i]);
+  let pts, corners = 0;
+  if (V.length >= 4 && V.length <= 10){
+    corners = V.length; pts = [];
+    const rad = j => { const A = V[(j - 1 + V.length) % V.length], B = V[j], C = V[(j + 1) % V.length];
+      return 0.14 * Math.min(Math.hypot(B[0] - A[0], B[1] - A[1]), Math.hypot(C[0] - B[0], C[1] - B[1])); };
+    const toward = (B, A, r) => { const l = Math.hypot(A[0] - B[0], A[1] - B[1]) || 1; return [B[0] + (A[0] - B[0]) * r / l, B[1] + (A[1] - B[1]) * r / l]; };
+    for (let j = 0; j < V.length; j++){
+      const A = V[(j - 1 + V.length) % V.length], B = V[j], C = V[(j + 1) % V.length], r = rad(j);
+      const p1 = toward(B, A, r), p2 = toward(B, C, r);
+      for (let t = 0; t <= 1.0001; t += 0.125){ const u = 1 - t; pts.push([u * u * p1[0] + 2 * u * t * B[0] + t * t * p2[0], u * u * p1[1] + 2 * u * t * B[1] + t * t * p2[1]]); }
+      const q2 = toward(C, B, rad((j + 1) % V.length)), len = Math.hypot(q2[0] - p2[0], q2[1] - p2[1]), n = Math.max(2, Math.round(len / (scale * 0.04)));
+      for (let k = 1; k < n; k++) pts.push([p2[0] + (q2[0] - p2[0]) * k / n, p2[1] + (q2[1] - p2[1]) * k / n]);
+    }
+  } else {
+    pts = dense;   // smooth/round outline: the hull itself
+  }
+  // re-sample by angle from the centre so the outline stays star-shaped and evenly spaced for the lens mesh
+  {
+    const M = 180, out = [];
+    let cxp = 0, cyp = 0; pts.forEach(p => { cxp += p[0]; cyp += p[1]; }); cxp /= pts.length; cyp /= pts.length;
+    for (let k = 0; k < M; k++){
+      const t = k / M * Math.PI * 2, dx = Math.cos(t), dy = Math.sin(t); let best = 0;
+      for (let i = 0; i < pts.length; i++){
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        const ax = a[0] - cxp, ay = a[1] - cyp, bx = b[0] - cxp, by = b[1] - cyp, ex = bx - ax, ey = by - ay;
+        const den = dx * ey - dy * ex; if (Math.abs(den) < 1e-12) continue;
+        const u = (ax * ey - ay * ex) / den, v = (ax * dy - ay * dx) / den;
+        if (u > 0 && v >= 0 && v <= 1) best = Math.max(best, u);
+      }
+      out.push([cxp + dx * best, cyp + dy * best]);
+    }
+    pts = out;
+  }
+  const polyFit = corners ? { corners } : null;
+  // preview crop with the traced outline
+  const pad = 1.6, sx = Math.max(0, cx - hw * pad), sy = Math.max(0, cy - hh * pad), sw = Math.min(W - sx, hw * 2 * pad), sh = Math.min(H - sy, hh * 2 * pad);
+  const pv = document.createElement('canvas'); const sc = 150 / Math.max(sw, sh); pv.width = Math.round(sw * sc); pv.height = Math.round(sh * sc);
+  const p = pv.getContext('2d'); p.drawImage(cv, sx, sy, sw, sh, 0, 0, pv.width, pv.height);
+  p.strokeStyle = '#a3e635'; p.lineWidth = 2; p.beginPath();
+  pts.forEach(([x, y], i) => { const X = (cx + x - sx) * sc, Y = (cy - y - sy) * sc; i ? p.lineTo(X, Y) : p.moveTo(X, Y); });
+  p.closePath(); p.stroke();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  lastTrace = { cv, cx, cy, hw, hh };
+  return { pts, quality, corners: polyFit ? polyFit.corners : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
+}
+
+/* Offline lens locator: the user drags a box around ONE lens (finger or mouse); returns normalised {x0,y0,x1,y1}. */
+function pickBox(img){
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000d;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px;touch-action:none';
+    const tip = document.createElement('div');
+    tip.style.cssText = 'color:#d9f99d;font-weight:700;font-size:15px;text-align:center;direction:rtl';
+    tip.textContent = 'اسحب بصباعك مربع حوالين عدسة واحدة (مع الإطار)';
+    const wrap = document.createElement('div'); wrap.style.cssText = 'position:relative;max-width:100%;max-height:72vh;line-height:0';
+    const cv = document.createElement('canvas'); cv.width = img.cv.width; cv.height = img.cv.height;
+    cv.style.cssText = 'max-width:94vw;max-height:72vh;border:1px solid #a3e63566;border-radius:6px;touch-action:none';
+    const ctx = cv.getContext('2d');
+    wrap.appendChild(cv);
+    const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:12px;direction:rtl';
+    const mk = (t, bg) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = `padding:10px 22px;border-radius:8px;border:1px solid #a3e635;background:${bg};color:#ecfccb;font-weight:700;font-size:15px`; return b; };
+    const ok = mk('✓ تمام', '#365314'), cancel = mk('✕ إلغاء', '#1f2937'), redo = mk('↺ من الأول', '#1f2937');
+    ok.disabled = true; ok.style.opacity = .4;
+    bar.append(ok, redo, cancel); ov.append(tip, wrap, bar); document.body.appendChild(ov);
+    let a = null, b = null, drag = false;
+    const draw = () => {
+      ctx.drawImage(img.cv, 0, 0);
+      if (a && b){
+        const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+        ctx.fillStyle = '#0008'; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img.cv, x, y, w, h, x, y, w, h);
+        ctx.strokeStyle = '#a3e635'; ctx.lineWidth = Math.max(2, cv.width / 300); ctx.strokeRect(x, y, w, h);
+      }
+    };
+    const pos = e => { const r = cv.getBoundingClientRect(); return { x:(e.clientX - r.left) * cv.width / r.width, y:(e.clientY - r.top) * cv.height / r.height }; };
+    cv.addEventListener('pointerdown', e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); a = b = pos(e); drag = true; draw(); });
+    cv.addEventListener('pointermove', e => { if (!drag) return; b = pos(e); draw(); });
+    cv.addEventListener('pointerup', () => { drag = false; const good = a && b && Math.abs(a.x - b.x) > cv.width * .05 && Math.abs(a.y - b.y) > cv.height * .03; ok.disabled = !good; ok.style.opacity = good ? 1 : .4; });
+    const close = v => { ov.remove(); resolve(v); };
+    cancel.onclick = () => close(null);
+    redo.onclick = () => { a = b = null; ok.disabled = true; ok.style.opacity = .4; draw(); };
+    ok.onclick = () => close({ x0:Math.min(a.x, b.x) / cv.width, y0:Math.min(a.y, b.y) / cv.height, x1:Math.max(a.x, b.x) / cv.width, y1:Math.max(a.y, b.y) / cv.height });
+    draw();
+  });
+}
+async function traceFrame(file){
+  if (!file) return;
+  const note = $('shNote');
+  const sample = await samplePromise;
+  try{
+    const lim = sample ? (typeof sample.limits === 'function' ? await sample.limits() : { images:true }) : null;
+    const img = await loadImageData(file);
+    let box;
+    if (lim && lim.images){
+      note.textContent = '🤖 بحدد مكان العدسة…';
+      const blob = await new Promise(r => img.cv.toBlob(r, 'image/jpeg', 0.88));
+      box = await sample.json(FRAME_PROMPT, { images:[blob], modelTier:'complex' });
+    } else {
+      note.textContent = '👆 حدد العدسة اليمين بمربع على الصورة';
+      box = await pickBox(img);
+      if (!box){ note.textContent = 'اتلغى التحديد'; return; }
+    }
+    const ok = box && [box.x0, box.y0, box.x1, box.y1].every(v => isFinite(+v) && +v >= 0 && +v <= 1) && Math.abs(box.x1 - box.x0) > 0.05 && Math.abs(box.y1 - box.y0) > 0.03;
+    if (!ok) throw new Error('bad box');
+    note.textContent = '✏️ بتتبع حافة الإطار…';
+    const tr = traceLens(img, { x0:+box.x0, y0:+box.y0, x1:+box.x1, y1:+box.y1 });
+    customPreview = tr.preview;
+    const preset = SHAPE_NAME[box.shape] && box.shape !== 'custom' ? box.shape : null;
+    const boxAspect = Math.abs(box.x1 - box.x0) * img.cv.width / (Math.abs(box.y1 - box.y0) * img.cv.height);
+    if (tr.quality >= 0.6){
+      customPts = tr.pts; state.shape = 'custom';
+      if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
+      syncUI(); requestRebuild(); renderShapes();
+      $('shNote').textContent = `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners ? ` — شكل بزوايا (${tr.corners} أضلاع)` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
+    } else {
+      // edge not clear enough (rimless / clear acetate / angled photo) → closest preset with the photo's proportions
+      if (preset) state.shape = preset;
+      if (boxAspect > 0.9 && boxAspect < 2.4) state.B = snap(state.A / boxAspect, 0.5, 26, 50);
+      syncUI(); requestRebuild(); renderShapes();
+      $('shNote').textContent = preset
+        ? `الحافة مش واضحة كفاية (${Math.round(tr.quality * 100)}%) — اخترت أقرب شكل: ${SHAPE_NAME[preset]}. للدقة صوّر من فوق على ورقة بيضا`
+        : 'الحافة مش واضحة — صوّر من فوق بالظبط على ورقة بيضا';
+    }
+  } catch(err){
+    console.error(err);
+    note.textContent = err && err.code === 'rate_limited' ? 'طلبات كتير — استنى دقيقة وجرّب تاني' : 'معرفتش أحدد العدسة — جرّب صورة أوضح على خلفية بيضا';
+  }
+}
+
+// Colour picker, collapsed: first choose the finish style (tabs), then only that style's colours drop down
+let swTab = {};   // remembered tab per family
+function renderSwatches(){
+  const fam = familyOf(state.frame), box = $('swatches'), rows = PALETTES[fam];
+  if (swTab[fam] === undefined){
+    const i = rows.findIndex(r => r.items.some(s => s.id === state.swatch));
+    swTab[fam] = i < 0 ? -1 : i;
+  }
+  const t = swTab[fam];
+  box.innerHTML = `<div class="sw-tabs">${rows.map((r, i) => `<button class="sw-tab ${i === t ? 'on' : ''}" data-tab="${i}">${r.label}</button>`).join('')}</div>${
+    t >= 0 ? `<div class="sw-row">${rows[t].items.map(s => `<button class="sw ${s.finish === 'g' ? 'gloss' : s.finish === 'c' ? 'clear' : ''} ${s.id === state.swatch ? 'on' : ''}"
+      data-sw="${s.id}" title="${s.name}" style="background-color:${s.hex};${s.finish === 'c' ? 'opacity:.75;' : ''}"></button>`).join('')}</div>` : ''}`;
+  box.querySelectorAll('.sw-tab').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.tab; swTab[fam] = swTab[fam] === i ? -1 : i; renderSwatches();   // tap again to close
+  }));
+  box.querySelectorAll('.sw').forEach(b => b.addEventListener('click', () => { state.swatch = b.dataset.sw; renderSwatches(); applyMaterials(); }));
+  const s = findSwatch(state.swatch); $('swName').textContent = s ? s.name.trim() : '';
+}
+const fc = $('frameCtrls');
+// engraved groups: frame position (Panto, Wrap) · frame depth · boxing dimensions (A, B, DBL)
+const mkGrp = (parent, ar, en) => { const g = document.createElement('div'); g.className = 'cgrp';
+  g.innerHTML = `<div class="cgrp-h"><span>${ar}</span><span class="en">${en}</span></div>`; parent.appendChild(g); return g; };
+const gPos = mkGrp(fc, '🕶️ وضع الفريم على الوش', 'Fit'), gDep = fc;
+const gBox = document.createElement('div');   // appended after depth
+makeCtrl(gPos, 'الميل البانتوسكوبي|Panto', range(0, 20, 2), v => v.toFixed(0) + '°', () => state.panto, v => state.panto = v);
+makeCtrl(gPos, 'زاوية الالتفاف|Wrap', range(0, 20, 1), v => v.toFixed(0) + '°', () => state.wrap, v => state.wrap = v);
+makeCtrl(gDep, 'عمق الإطار مم|Depth', range(2, 6, 0.5), mm, () => state.depth, v => state.depth = v, 'depthRow');
+{ const g = mkGrp(fc, '🔲 أبعاد الإطار', 'Boxing'); gBox.replaceWith && 0; window.__gBox = g; }
+makeCtrl(window.__gBox, 'عرض العدسة|A-Box', range(44, 62, 0.5), mm, () => state.A, v => state.A = v);
+makeCtrl(window.__gBox, 'ارتفاع العدسة|B-Box', range(26, 50, 0.5), mm, () => state.B, v => state.B = v);
+makeCtrl(window.__gBox, 'عرض الجسر|DBL', range(12, 24, 0.5), mm, () => state.DBL, v => state.DBL = v);
+
+/* Make every English term / abbreviation in the UI bold and one-two sizes bigger (Arabic text untouched) */
+const EN_RE = /[A-Za-z][A-Za-z0-9\-\/&·↑+.]*(?:[ ]+[A-Za-z0-9\-\/&·↑+.]+)*/g;
+function emphasizeEnglish(root = document.body){
+  const skip = n => n.closest && n.closest('select,option,textarea,script,style,svg,.en,.en-t,.fh,#hud .v,canvas');
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: t => (!t.parentElement || skip(t.parentElement) || !/[A-Za-z]/.test(t.nodeValue)) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+  });
+  const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const t of nodes){
+    const txt = t.nodeValue, frag = document.createDocumentFragment(); let last = 0;
+    txt.replace(EN_RE, (m, off) => {
+      if (off > last) frag.appendChild(document.createTextNode(txt.slice(last, off)));
+      const sp = document.createElement('span'); sp.className = 'en-t'; sp.textContent = m; frag.appendChild(sp);
+      last = off + m.length; return m;
+    });
+    if (last < txt.length) frag.appendChild(document.createTextNode(txt.slice(last)));
+    t.parentNode.replaceChild(frag, t);
+  }
+}
+function syncUI(){
+  refreshers.forEach(f => f());
+  $('pd').value = state.pd.toFixed(2); $('pdR').value = state.pdR.toFixed(2); $('pdL').value = state.pdL.toFixed(2);
+  $('ar').value = state.ar;
+  $('showFrame').checked = state.showFrame; $('showOC').checked = state.showOC; $('showGC').checked = state.showGC;
+  $('lgGC').checked = state.showGC; $('lgOC').checked = state.showOC;
+  refreshFrameTgl();
+  applyMaterials(); renderSwatches(); renderShapes(); emphasizeEnglish();
+  $('depthRow').classList.toggle('dis', state.frame === 'rimless');
+}
+
+$('showGC').addEventListener('change', e => { state.showGC = e.target.checked; syncUI(); requestRebuild(); });
+$('lgGC').addEventListener('change', e => { state.showGC = e.target.checked; syncUI(); requestRebuild(); });
+$('lgOC').addEventListener('change', e => { state.showOC = e.target.checked; syncUI(); requestRebuild(); });
+$('ar').addEventListener('change', e => { state.ar = e.target.value; applyMaterials(); });
+$('showFrame').addEventListener('change', e => { state.showFrame = e.target.checked; syncUI(); requestRebuild(); });
+$('showOC').addEventListener('change', e => { state.showOC = e.target.checked; syncUI(); requestRebuild(); });
+
+// PD sync: total → symmetric monos (R gets the extra 0.25 when total/2 isn't on the 0.5 grid)
+function setTotalPD(total){
+  state.pd = Math.min(90, Math.max(40, total));
+  let r = Math.ceil((state.pd / 2) * 2 - 1e-9) / 2; r = Math.min(45, Math.max(20, r));
+  let l = Math.min(45, Math.max(20, state.pd - r));
+  state.pdR = r; state.pdL = l; state.pd = r + l;
+}
+$('pd').addEventListener('change', e => { setTotalPD(parseFloat(e.target.value)); syncUI(); requestRebuild(); });
+const monoChanged = () => {
+  state.pdR = parseFloat($('pdR').value); state.pdL = parseFloat($('pdL').value);
+  state.pd = Math.min(90, Math.max(40, state.pdR + state.pdL)); syncUI(); requestRebuild();
+};
+$('pdR').addEventListener('change', monoChanged);
+$('pdL').addEventListener('change', monoChanged);
+
+// Section resets 🔄
+const RESET_KEYS = {
+  rx:    ['R', 'L', 'pd', 'pdR', 'pdL', 'ocMode', 'ocManual'],
+  lens:  ['index', 'design', 'ar'],
+  style: ['frame', 'swatch', 'shape', 'depth'],
+  frame: ['depth', 'A', 'B', 'DBL', 'panto', 'wrap', 'showFrame', 'showOC', 'showGC']
+};
+document.querySelectorAll('.rst').forEach(b => b.addEventListener('click', () => {
+  for (const k of RESET_KEYS[b.dataset.reset]) state[k] = structuredClone(DEFAULTS[k]);
+  syncUI(); requestRebuild();
+}));
+
+// New session
+$('newBtn').addEventListener('click', () => {
+  state = structuredClone(DEFAULTS);
+  $('ocrText').value = ''; $('ocrText').style.display = 'none';
+  $('ocrFile').value = ''; $('ocrCam').value = '';
+  $('ocrStatus').textContent = 'صوّر الروشتة أو ارفع صورتها وهتتملى القيم تلقائياً';
+  if (spinning) setSpin(false);
+  syncUI(); requestRebuild(); goView('iso');
+});
+
+/* ---- Stats table + HUD ---- */
+const DESIGN_NAMES = { spheric:'Spheric', aspheric:'Aspheric', freeform:'FreeForm', double:'Double Aspheric' };
+function renderStats(){
+  if (!lastStats) return;
+  const R = lastStats.R, L = lastStats.L;
+  for (const [k, s] of [['hudR', R], ['hudL', L]]){
+    const el = $(k);
+    if (s.protT === null){ el.textContent = '—'; el.classList.remove('bad'); }
+    else { el.textContent = s.protT.toFixed(2); el.classList.toggle('bad', s.protT > 1.5); }
+  }
+  const anyBad = [R, L].some(s => s.protT !== null && s.protT > 1.5);
+  $('hstat').textContent = state.frame === 'rimless' ? 'بدون إطار: الحافة مصقولة ظاهرة' :
+    (anyBad ? 'تنبيه: العدسة بارزة من ورا الإطار ⚠️' : 'العدسة مركّبة Flush مع الإطار ✓');
+  emphasizeEnglish($('hstat'));
+}
+
+/* ---- OCR ---- */
+const snap = (v, st, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v / st) * st));
+function parseRx(raw){
+  const text = raw.replace(/,/g, '.').replace(/[−–—]/g, '-').toUpperCase();
+  const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const out = {};
+  const grab = line => (line.match(/[+-]?\d{1,3}(?:\.\d{1,2})?/g) || []).map(Number).filter(v => Math.abs(v) <= 180);
+  const assign = (eye, nums) => {
+    const powers = []; let axis = null;
+    for (const v of nums){
+      if (powers.length < 2 && Math.abs(v) <= 25) powers.push(v);
+      else if (axis === null && Number.isInteger(v) && v >= 0 && v <= 180) axis = v;
+    }
+    let sph = powers[0] ?? 0, cyl = powers[1] ?? 0, ax = axis ?? 0;
+    if (cyl > 0){ sph += cyl; cyl = -cyl; ax = ((ax + 89) % 180) + 1; }  // transpose to minus-cyl
+    out[eye] = { sph, cyl, axis:ax };
+  };
+  const eyeOf = l => /(^|[^A-Z])(OD|R|RE|RIGHT)([^A-Z]|$)/.test(l) ? 'R' : (/(^|[^A-Z])(OS|L|LE|LEFT)([^A-Z]|$)/.test(l) ? 'L' : null);
+  const loose = [];
+  for (const line of lines){
+    if (/P\.?D/.test(line) && !/(OD|OS)/.test(line)) continue;
+    const nums = grab(line); if (!nums.length) continue;
+    const e = eyeOf(line);
+    if (e && !out[e]) assign(e, nums); else if (!e && nums.length >= 2) loose.push(nums);
+  }
+  if (!out.R && loose.length) assign('R', loose.shift());
+  if (!out.L && loose.length) assign('L', loose.shift());
+  const pdm = text.match(/(?:I\.?\s?P\.?\s?D|P\.?\s?D|MPD|DPD)\.?[^0-9]{0,8}(\d{2}(?:\.\d)?)/);   // PD = IPD if (pdm) out.pd = parseFloat(pdm[1]);
+  const mr = text.match(/(?:I?\.?P\.?D|MONO|MPD)[^\n]{0,10}\b(?:R|OD|RIGHT)\b[^0-9]{0,6}(\d{2}(?:\.\d)?)/), ml = text.match(/(?:I?\.?P\.?D|MONO|MPD)[^\n]{0,10}\b(?:L|OS|LEFT)\b[^0-9]{0,6}(\d{2}(?:\.\d)?)/);
+  if (mr) out.pdR = parseFloat(mr[1]); if (ml) out.pdL = parseFloat(ml[1]);
+  return out;
+}
+/* Reading the Rx photo:
+   1) Inside Claude (published page): the image is read by Claude itself via the `sample` capability (most accurate,
+      handles handwriting / printed tables, numbers only).
+   2) Standalone file: falls back to Tesseract.js OCR + parseRx(). */
+const samplePromise = (window.claude && typeof window.claude.use === 'function')
+  ? Promise.resolve(window.claude.use('sample')).catch(() => null) : Promise.resolve(null);
+
+async function shrinkImage(file, maxSide = 1600){
+  try{
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    return await new Promise(res => cv.toBlob(b => res(b || file), 'image/jpeg', 0.88));
+  } catch(e){ return file; }
+}
+/* PD from the Rx: monocular values (R/L) win — each eye set on its own and the total = R + L.
+   Only a total → split symmetrically. Accepts numbers or strings like "64/61" (distance/near → first value). */
+const pdNum = v => { if (v === null || v === undefined) return NaN; const m = String(v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(',', '.').match(/\d{2}(?:\.\d+)?/); return m ? parseFloat(m[0]) : NaN; };
+function applyPD(rx){
+  if (!rx) return false;
+  let r = pdNum(rx.pdR), l = pdNum(rx.pdL), t = pdNum(rx.pd);
+  const okM = v => isFinite(v) && v >= 20 && v <= 45, okT = v => isFinite(v) && v >= 40 && v <= 90;
+  if (okM(r) && okM(l)){
+    state.pdR = snap(r, 0.5, 20, 45); state.pdL = snap(l, 0.5, 20, 45); state.pd = state.pdR + state.pdL; return true;
+  }
+  if (okT(t) && okM(r) && !okM(l)){ state.pdR = snap(r, 0.5, 20, 45); state.pdL = snap(t - r, 0.5, 20, 45); state.pd = state.pdR + state.pdL; return true; }
+  if (okT(t) && okM(l) && !okM(r)){ state.pdL = snap(l, 0.5, 20, 45); state.pdR = snap(t - l, 0.5, 20, 45); state.pd = state.pdR + state.pdL; return true; }
+  if (okT(t)){ setTotalPD(snap(t, 0.5, 40, 90)); return true; }
+  if (okM(t)){ state.pdR = state.pdL = snap(t, 0.5, 20, 45); state.pd = state.pdR + state.pdL; return true; }   // a single mono value written as "PD 31"
+  return false;
+}
+function applyRx(rx){
+  let n = 0;
+  for (const eye of ['R', 'L']){
+    const e = rx && rx[eye];
+    if (!e || typeof e.sph !== 'number') continue;
+    let sph = e.sph, cyl = +e.cyl || 0, ax = Math.round(+e.axis || 0);
+    if (cyl > 0){ sph += cyl; cyl = -cyl; ax = ((ax + 89) % 180) + 1; }   // to minus-cylinder
+    state[eye].sph = snap(sph, 0.25, -12, 10);
+    state[eye].cyl = snap(cyl, 0.25, -6, 0);
+    state[eye].axis = snap(ax, 1, 0, 180); n++;
+  }
+  applyPD(rx);
+  syncUI(); requestRebuild();
+  return n;
+}
+const RX_PROMPT = `You are reading a photo of an eyeglass prescription (may be printed, handwritten, Arabic or English).
+Extract ONLY the DISTANCE prescription numbers for each eye (ignore ADD / near / VA / prism unless no distance row exists).
+Right eye = OD / R / RE / يمين. Left eye = OS / L / LE / يسار.
+Return ONLY this JSON, no other text:
+{"R":{"sph":number,"cyl":number,"axis":integer} or null,"L":{"sph":number,"cyl":number,"axis":integer} or null,"pd":number or null,"pdR":number or null,"pdL":number or null}
+Rules: sph and cyl in diopters (e.g. -2.25); "PL"/"plano"/"0" = 0; missing cyl = 0 and axis = 0.
+PD and IPD mean the SAME thing (pupillary / interpupillary distance, in mm) — treat any of these labels identically: PD, P.D, P.D., IPD, I.P.D, I/PD, Mono PD, MPD, DPD, Dist PD, "المسافة بين الحدقتين", "بعد الحدقتين", "المسافة البؤرية". Look everywhere on the sheet, including next to each eye's row.
+- If a value per eye is written (monocular, usually 25–40 mm, e.g. R 32 / L 31.5): put them in pdR and pdL.
+- If one combined value is written (usually 50–75 mm, e.g. "PD 63" or "63/60" distance/near): put the DISTANCE value in pd.
+- If both exist, fill all three. Use null for anything not written. Never guess a PD.`;
+
+async function runOCR(file){
+  if (!file) return;
+  const st = $('ocrStatus');
+  const sample = await samplePromise;
+  if (sample){
+    try{
+      const lim = typeof sample.limits === 'function' ? await sample.limits() : { images:true };
+      if (lim && lim.images){
+        st.textContent = '🤖 جاري قراءة الروشتة…';
+        const img = await shrinkImage(file);
+        const rx = await sample.json(RX_PROMPT, { images:[img], modelTier:'default' });
+        $('ocrText').value = JSON.stringify(rx); $('ocrText').style.display = 'block';
+        const n = applyRx(rx);
+        const pdTxt = ` • PD ${state.pd.toFixed(1)} (${state.pdR.toFixed(1)} / ${state.pdL.toFixed(1)})`;
+        st.textContent = n ? `تمت القراءة: ${n} عين${pdTxt} — راجع القيم قبل الاعتماد` : 'ملقتش قيم واضحة — دخّلها يدوي';
+        return;
+      }
+    } catch(err){
+      console.error(err);
+      if (err && err.code === 'rate_limited'){ st.textContent = 'طلبات كتير ورا بعض — استنى دقيقة وجرّب تاني'; return; }
+      if (!err || err.code !== 'not_granted'){ st.textContent = 'حصل خطأ أثناء القراءة — جرّب صورة أوضح'; return; }
+      // not granted → fall through to Tesseract
+    }
+  }
+  if (typeof Tesseract === 'undefined'){ st.textContent = 'تعذّر تحميل مكتبة OCR — اتأكد من الإنترنت'; return; }
+  st.textContent = 'جاري قراءة الصورة…';
+  try{
+    const { data:{ text } } = await Tesseract.recognize(file, 'eng', {
+      logger: m => { if (m.status === 'recognizing text') st.textContent = `جاري التعرّف على النص ${Math.round(m.progress * 100)}%`; }
+    });
+    $('ocrText').value = text; $('ocrText').style.display = 'block';
+    const n = applyRx(parseRx(text));
+    st.textContent = n ? `تمت القراءة: ${n} عين — راجع القيم قبل الاعتماد` : 'ملقتش قيم واضحة — دخّلها يدوي';
+  } catch(err){ console.error(err); st.textContent = 'حصل خطأ أثناء القراءة'; }
+}
+/* Frame size from the temple marking, e.g. "52□18-140", "52-18 140", "54 ▢ 17 145" → A (eye size), DBL, temple. */
+const ARM_PROMPT = `This photo shows the inside of an eyeglass temple (arm) or frame with printed size markings.
+Find the frame size marking. It is usually written like "52□18-140", "52-18-140", "52 18 145" or "54▢17 140":
+the first number = eye size A (lens width, 40–65 mm), the second = DBL bridge (12–26 mm), the third = temple length (120–155 mm).
+Some frames also print the lens height B (25–50 mm), e.g. "52/38". Ignore model numbers, colour codes, CE marks and brand names.
+Return ONLY JSON: {"A":number or null,"DBL":number or null,"B":number or null,"temple":number or null,"raw":"the marking as written"}`;
+async function readArm(file){
+  if (!file) return;
+  const note = $('armNote'), sample = await samplePromise;
+  try{
+    let r;
+    const lim = sample ? (typeof sample.limits === 'function' ? await sample.limits() : { images:true }) : null;
+    if (lim && lim.images){
+      note.textContent = '🤖 بقرا مقاسات الذراع…';
+      r = await sample.json(ARM_PROMPT, { images:[await shrinkImage(file, 1800)], modelTier:'default' });
+    } else {
+      note.textContent = '🔎 بقرا مقاسات الذراع (OCR)…';
+      const { data:{ text } } = await Tesseract.recognize(await shrinkImage(file, 1800), 'eng');
+      const t = (text || '').replace(/[Oo]/g, '0').replace(/[Il|]/g, '1');
+      const m = t.match(/(\d{2})\D{0,3}(\d{2})\D{0,3}(1[2-5]\d)/);
+      r = m ? { A:+m[1], DBL:+m[2], temple:+m[3], B:null, raw:m[0].trim() } : {};
+    }
+    const A = +r?.A, D = +r?.DBL, B = +r?.B, T = +r?.temple, got = [];
+    if (A >= 40 && A <= 65){ state.A = snap(A, 0.5, 44, 62); got.push(`A ${state.A}`); }
+    if (D >= 12 && D <= 26){ state.DBL = snap(D, 0.5, 12, 24); got.push(`DBL ${state.DBL}`); }
+    if (B >= 25 && B <= 50){ state.B = snap(B, 0.5, 26, 50); got.push(`B ${state.B}`); }
+    if (!got.length){ note.textContent = 'ملقتش المقاس — قرّب الكاميرا من الكتابة اللي جوه الذراع ونوّر عليها'; return; }
+    syncUI(); requestRebuild();
+    note.textContent = `تم ✓ ${r.raw ? `(${r.raw}) ` : ''}— ${got.join(' • ')}${T >= 120 && T <= 160 ? ` • الذراع ${T}` : ''}${got.some(g => g.startsWith('B')) ? '' : ' — B مش مكتوب على الذراع، ظبّطه يدوي أو من صورة الفريم'}`;
+  } catch(err){
+    console.error(err);
+    note.textContent = err && err.code === 'rate_limited' ? 'طلبات كتير — استنى دقيقة وجرّب تاني' : 'حصل خطأ في القراءة — جرّب صورة أوضح';
+  }
+}
+['armCam', 'armFile'].forEach(id => $(id).addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; readArm(f); }));
+$('ocrFile').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; runOCR(f); });   // reset so the same photo can be read again
+$('ocrCam').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; runOCR(f); });
+/* =====================================================================
+   10) LOOP
+   ===================================================================== */
+function showErr(m){ const el = $('err'); el.textContent = 'تعذّر تحديث المجسم (تم الإبقاء على الشكل السابق): ' + m; el.style.display = 'block'; }
+function hideErr(){ $('err').style.display = 'none'; }
+
+function resize(){
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  // keep the horizontal field of view constant so a 140 mm frame always fits, even on a tall phone screen
+  const refAspect = 1.3, baseHalf = THREE.MathUtils.degToRad(18);
+  camera.fov = camera.aspect >= refAspect ? 36 : Math.min(80, THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(baseHalf) * refAspect / camera.aspect)));
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+window.addEventListener('resize', resize);
+
+function animate(now){
+  requestAnimationFrame(animate);
+  if (needsRebuild){
+    needsRebuild = false;
+    try { rebuild(); } catch(err){ console.error(err); showErr(err.message); }
+  }
+  if (tween){
+    const t = Math.min(1, (now - tween.t0) / tween.dur), e = t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
+    camera.position.lerpVectors(tween.from, tween.to, e);
+    controls.target.lerpVectors(tween.fromT, tween.toT, e);
+    if (t >= 1) tween = null;
+  }
+  const nowS = now / 1000, dt = Math.min(0.1, nowS - (animate.last || nowS)); animate.last = nowS;
+  controls.update(dt);   // frame-rate independent turntable speed (~38 s per turn)
+  // Two-pass layered render (see BUG FIX #4)
+  renderer.clear();
+  camera.layers.set(0); renderer.render(scene, camera);
+  camera.layers.set(1); renderer.render(scene, camera);
+}
+
+/* ---- Manual outline editor: drag 12 handles on the photo (fixes faint rimless edges / corners) ---- */
+let trHandles = [], trView = null, trDrag = -1, trMode = 'corner', trRound = 0.12, trN = 16;
+// re-distribute N handles evenly (by arc length) along the outline currently drawn, so the shape is kept
+function trResample(n){
+  const O = trOutline(trHandles); if (O.length < 3) return;
+  const L = [0]; for (let i = 1; i <= O.length; i++){ const a = O[i - 1], b = O[i % O.length]; L.push(L[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+  const tot = L[L.length - 1], out = []; let j = 0;
+  for (let k = 0; k < n; k++){ const d = k * tot / n; while (j < O.length - 1 && L[j + 1] < d) j++;
+    const a = O[j], b = O[(j + 1) % O.length], t = (d - L[j]) / ((L[j + 1] - L[j]) || 1); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
+  trHandles = out;
+}
+function trSetN(n){
+  trN = n; document.querySelectorAll('#trNp button').forEach(b => b.classList.toggle('on', +b.dataset.n === n));
+  if (trHandles.length && trHandles.length !== n){ trResample(n); drawTrace(); }
+}
+/* Outline through the handles: 'corner' = straight sides with rounded corners (radius = trRound × shorter side),
+   'curve' = smooth closed centripetal Catmull-Rom spline passing through every handle. */
+function trOutline(V){
+  if (trMode === 'curve'){
+    const c = new THREE.CatmullRomCurve3(V.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, 'centripetal');
+    return c.getPoints(240).slice(0, 240).map(p => [p.x, p.y]);
+  }
+  const toward = (B, A, r) => { const l = Math.hypot(A[0] - B[0], A[1] - B[1]) || 1; return [B[0] + (A[0] - B[0]) * r / l, B[1] + (A[1] - B[1]) * r / l]; };
+  const pts = [];
+  for (let j = 0; j < V.length; j++){
+    const A = V[(j - 1 + V.length) % V.length], B = V[j], C = V[(j + 1) % V.length];
+    const r = trRound * Math.min(Math.hypot(B[0] - A[0], B[1] - A[1]), Math.hypot(C[0] - B[0], C[1] - B[1]));
+    const p1 = toward(B, A, r), p2 = toward(B, C, r);
+    for (let t = 0; t <= 1.0001; t += 0.0625){ const u = 1 - t; pts.push([u * u * p1[0] + 2 * u * t * B[0] + t * t * p2[0], u * u * p1[1] + 2 * u * t * B[1] + t * t * p2[1]]); }
+  }
+  return pts;
+}
+function trSetMode(m){
+  trMode = m; $('trM1').classList.toggle('on', m === 'corner'); $('trM2').classList.toggle('on', m === 'curve');
+  $('trRdRow').classList.toggle('off', m === 'curve'); if (trView) drawTrace();
+}
+function openTraceEditor(){
+  if (!lastTrace || !customPts) return;
+  const { cv, cx, cy, hw, hh } = lastTrace;
+  const pad = 1.45, sx = Math.max(0, cx - hw * pad), sy = Math.max(0, cy - hh * pad);
+  const sw = Math.min(cv.width - sx, hw * 2 * pad), sh = Math.min(cv.height - sy, hh * 2 * pad);
+  const maxW = Math.min(window.innerWidth, 700), maxH = window.innerHeight - 150;
+  const k = Math.min(maxW / sw, maxH / sh);
+  const c = $('trCv'), dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = Math.round(sw * k * dpr); c.height = Math.round(sh * k * dpr);
+  c.style.width = Math.round(sw * k) + 'px'; c.style.height = Math.round(sh * k) + 'px';
+  trView = { sx, sy, sw, sh, k, dpr };
+  // 12 handles, evenly by angle, from the current outline (canonical y-up, relative to the lens centre)
+  const n = customPts.length; trHandles = [];
+  for (let i = 0; i < 12; i++){ const p = customPts[Math.round(i * n / 12) % n]; trHandles.push([cx + p[0], cy - p[1]]); }
+  $('trEd').classList.add('on');
+  const keepMode = trMode; trMode = 'curve'; trResample(trN); trMode = keepMode;   // start with trN handles on the traced outline
+  trSetN(trN); drawTrace();
+}
+function drawTrace(){
+  const c = $('trCv'), g = c.getContext('2d'), { sx, sy, sw, sh, k, dpr } = trView;
+  g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height);
+  g.drawImage(lastTrace.cv, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  const P = trHandles.map(([x, y]) => [(x - sx) * k * dpr, (y - sy) * k * dpr]);
+  const O = trOutline(P);
+  g.lineWidth = 2.5 * dpr; g.strokeStyle = '#a3e635'; g.beginPath();
+  O.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
+  const hr = trHandles.length > 20 ? 7 : trHandles.length > 14 ? 8.5 : 10;
+  P.forEach(([x, y], i) => { g.beginPath(); g.arc(x, y, (i === trDrag ? hr + 3 : hr) * dpr, 0, Math.PI * 2);
+    g.fillStyle = i === trDrag ? 'rgba(163,230,53,.9)' : 'rgba(163,230,53,.45)'; g.fill(); g.lineWidth = 2 * dpr; g.strokeStyle = '#0b1a0f'; g.stroke(); });
+}
+function trPos(e){ const r = $('trCv').getBoundingClientRect(), { sx, sy, k } = trView; return [sx + (e.clientX - r.left) / k, sy + (e.clientY - r.top) / k]; }
+$('trCv').addEventListener('pointerdown', e => {
+  const [x, y] = trPos(e); let bi = -1, bd = Infinity;
+  trHandles.forEach(([hx, hy], i) => { const d = Math.hypot(hx - x, hy - y); if (d < bd){ bd = d; bi = i; } });
+  if (bd * trView.k < (trHandles.length > 20 ? 26 : 36)){ trDrag = bi; $('trCv').setPointerCapture(e.pointerId); drawTrace(); }
+});
+$('trCv').addEventListener('pointermove', e => { if (trDrag < 0) return; trHandles[trDrag] = trPos(e); drawTrace(); });
+const trEnd = () => { trDrag = -1; if (trView) drawTrace(); };
+$('trCv').addEventListener('pointerup', trEnd); $('trCv').addEventListener('pointercancel', trEnd);
+document.querySelectorAll('#trNp button').forEach(b => b.addEventListener('click', () => trSetN(+b.dataset.n)));
+$('trM1').addEventListener('click', () => trSetMode('corner'));
+$('trM2').addEventListener('click', () => trSetMode('curve'));
+$('trRd').addEventListener('input', e => { trRound = +e.target.value / 100; if (trView) drawTrace(); });
+$('trNo').addEventListener('click', () => $('trEd').classList.remove('on'));
+$('trOk').addEventListener('click', () => {
+  const { cx, cy } = lastTrace;
+  // handles → polygon (canonical, y up) with small rounded corners → re-sampled by angle (star-shaped)
+  let V = trHandles.map(([x, y]) => [x - cx, cy - y]);
+  let area = 0; V.forEach((p, i) => { const q = V[(i + 1) % V.length]; area += p[0] * q[1] - q[0] * p[1]; }); if (area < 0) V.reverse();
+  const pts = trOutline(V);
+  let mx = 0, my = 0; pts.forEach(p => { mx += p[0]; my += p[1]; }); mx /= pts.length; my /= pts.length;
+  const out = [];
+  for (let kk = 0; kk < 180; kk++){
+    const t = kk / 180 * Math.PI * 2, dx = Math.cos(t), dy = Math.sin(t); let best = 0;
+    for (let i = 0; i < pts.length; i++){
+      const a = pts[i], b = pts[(i + 1) % pts.length], ax = a[0] - mx, ay = a[1] - my, ex = b[0] - a[0], ey = b[1] - a[1];
+      const den = dx * ey - dy * ex; if (Math.abs(den) < 1e-12) continue;
+      const u = (ax * ey - ay * ex) / den, v = (ax * dy - ay * dx) / den;
+      if (u > 0 && v >= 0 && v <= 1) best = Math.max(best, u);
+    }
+    out.push([mx + dx * best, my + dy * best]);
+  }
+  customPts = out; state.shape = 'custom';
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  out.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
+  const asp = (x1 - x0) / (y1 - y0); if (asp > 0.9 && asp < 2.4) state.B = snap(state.A / asp, 0.5, 26, 50);
+  // refresh the small preview with the edited outline
+  { const { sx, sy, sw, sh } = trView, pv = document.createElement('canvas'), sc = 150 / Math.max(sw, sh);
+    pv.width = Math.round(sw * sc); pv.height = Math.round(sh * sc); const g = pv.getContext('2d');
+    g.drawImage(lastTrace.cv, sx, sy, sw, sh, 0, 0, pv.width, pv.height); g.strokeStyle = '#a3e635'; g.lineWidth = 2; g.beginPath();
+    out.forEach(([x, y], i) => { const X = (cx + x - sx) * sc, Y = (cy - y - sy) * sc; i ? g.lineTo(X, Y) : g.moveTo(X, Y); }); g.closePath(); g.stroke();
+    customPreview = pv.toDataURL('image/jpeg', 0.85); }
+  $('trEd').classList.remove('on');
+  syncUI(); requestRebuild(); renderShapes();
+  $('shNote').textContent = 'تم ✓ — اتطبّق الشكل اللي ظبطته بإيدك. ظبّط A و B بمقاس الذراع';
+});
+
+syncUI();
+applyMaterials();
+resize();
+goView('iso', true);
+requestAnimationFrame(animate);
+
+// expose for debugging
+window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, get state(){ return state; }, get root(){ return root; }, get stats(){ return lastStats; } };
+</script>
+<script>if('serviceWorker' in navigator) addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
+</body>
+</html>
