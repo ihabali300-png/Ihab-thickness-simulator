@@ -108,6 +108,17 @@
   .hitw .hit{ flex:1; }
   .del{ flex:none; width:52px; background:#2a0b0b; color:#fca5a5; border:1px solid #f8717188; border-radius:8px; font-size:16px; cursor:pointer; }
   .del.sure{ background:#b91c1c; color:#fff; font-size:12.5px; font-weight:800; }
+  #q{ font-family:inherit; direction:rtl; }
+  #dateBtn.on{ background:var(--lime); color:#0b1a0f; }
+  #dateBar{ display:none; padding:8px 10px; border-bottom:1px solid #a3e63544; max-width:440px; width:100%; margin:0 auto; }
+  #dateBar.on{ display:block; }
+  #dateBar .chips{ display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:8px; }
+  #dateBar button{ background:#030a05; color:#e7f7d2; border:1px solid #a3e63555; border-radius:16px; padding:6px 2px; font-size:12.5px; cursor:pointer; font-family:inherit; }
+  #dateBar button.on{ background:var(--lime); color:#0b1a0f; font-weight:800; }
+  #dateBar .dr{ display:grid; grid-template-columns:1fr 1fr auto; gap:6px; align-items:end; }
+  #dateBar label{ display:flex; flex-direction:column; gap:3px; font-size:12px; color:#bef264; }
+  #dateBar input[type=date]{ background:var(--box); color:var(--lime2); border:1px solid #a3e63550; border-radius:7px; height:38px; padding:0 6px; font-size:13.5px; color-scheme:dark; width:100%; }
+  #dateBar #dClear{ border-radius:8px; height:38px; padding:0 8px; font-size:11.5px; color:#fca5a5; border-color:#f8717166; }
 </style>
 </head>
 <body>
@@ -147,8 +158,13 @@
 
 <div id="sheet">
   <div class="top">
-    <input type="text" id="q" placeholder="🔍 ابحث بالكود أو الأوردر أو التاريخ (مثلاً 11-11)" autocomplete="off">
+    <input type="text" id="q" placeholder="🔍 ابحث بالكود أو الأوردر" autocomplete="off">
+    <button id="dateBtn" title="فلتر بالتاريخ">📅</button>
     <button id="closeSheet">✕</button>
+  </div>
+  <div id="dateBar">
+    <div class="chips"><button data-d="0">اليوم</button><button data-d="1">إمبارح</button><button data-d="7">آخر 7 أيام</button><button data-d="30">آخر 30 يوم</button></div>
+    <div class="dr"><label>من<input type="date" id="dFrom"></label><label>إلى<input type="date" id="dTo"></label><button id="dClear">✕ إلغاء الفلتر</button></div>
   </div>
   <div class="list" id="results"></div>
 </div>
@@ -263,10 +279,12 @@ function renderHits(){
   const q = $('q').value.trim().toLowerCase(), box = $('results');
   if (!allRows){ return; }
   let hits = allRows.slice().reverse();
+  const f = $('dFrom').value, t = $('dTo').value;
+  if (f || t) hits = hits.filter(r => { const d = String(r[0] || '').slice(0, 10); return (!f || d >= f) && (!t || d <= t); });
   if (q) hits = hits.filter(r => [r[0], r[1], r[2]].some(x => String(x || '').toLowerCase().includes(q)));
-  hits = hits.slice(0, 40);
-  box.innerHTML = `<div class="hint">${q ? `${hits.length} نتيجة` : 'آخر السجلات — اكتب عشان تفلتر'}</div>`;
-  if (!hits.length && q) box.innerHTML += '<div class="hint">مفيش سجل بالكود أو الأوردر ده</div>';
+  hits = hits.slice(0, (f || t) ? 300 : 40);
+  box.innerHTML = `<div class="hint">${(q || f || t) ? `${hits.length} نتيجة${(f || t) ? ` · من ${f || '…'} إلى ${t || '…'}` : ''}` : 'آخر السجلات — اكتب أو دوس 📅 عشان تفلتر'}</div>`;
+  if (!hits.length && (q || f || t)) box.innerHTML += '<div class="hint">مفيش سجل بالكود أو الأوردر ده</div>';
   hits.forEach(r => {
     const w = document.createElement('div'); w.className = 'hitw';
     const b = document.createElement('button');
@@ -300,6 +318,20 @@ function closeSheet(){ $('sheet').classList.remove('on'); }
 $('logBtn').addEventListener('click', openSheet);
 $('closeSheet').addEventListener('click', closeSheet);
 $('q').addEventListener('input', renderHits);
+/* 📅 date filter: quick chips or a from–to calendar range */
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+$('dateBtn').addEventListener('click', () => { $('dateBar').classList.toggle('on'); $('dateBtn').classList.toggle('on', $('dateBar').classList.contains('on')); });
+document.querySelectorAll('#dateBar .chips button').forEach(b => b.addEventListener('click', () => {
+  const n = +b.dataset.d, now = new Date(), from = new Date(now); from.setDate(now.getDate() - n);
+  const to = n === 1 ? from : now;
+  $('dFrom').value = ymd(from); $('dTo').value = ymd(to);
+  document.querySelectorAll('#dateBar .chips button').forEach(x => x.classList.toggle('on', x === b)); renderHits();
+}));
+['dFrom', 'dTo'].forEach(id => $(id).addEventListener('change', () => {
+  if ($('dFrom').value && !$('dTo').value) $('dTo').value = $('dFrom').value;   // one day picked → that day only
+  document.querySelectorAll('#dateBar .chips button').forEach(x => x.classList.remove('on')); renderHits();
+}));
+$('dClear').addEventListener('click', () => { $('dFrom').value = ''; $('dTo').value = ''; document.querySelectorAll('#dateBar .chips button').forEach(x => x.classList.remove('on')); renderHits(); });
 
 resetForm();
 flushQ().catch(() => {});
