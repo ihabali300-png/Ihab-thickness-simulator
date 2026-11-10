@@ -232,6 +232,40 @@
     .sw-row{ justify-content:center; } .sw-row .lb{ width:auto; flex-basis:100%; text-align:center; }
     .sw-h{ text-align:center; } .chks{ justify-content:center; }
   }
+
+  /* ===== curtain layout: 3 main tiles → sections; sub-sections drop down in place ===== */
+  .tiles{ position:sticky; top:-12px; z-index:4; display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; padding:4px 0 10px; background:linear-gradient(#091a0ff2 85%, #091a0f00); }
+  .tile{ background:#030a05; border:1px solid #a3e63540; border-radius:13px; padding:7px 3px 6px; color:#e7f7d2; cursor:pointer;
+         display:flex; flex-direction:column; align-items:center; gap:1px; font-family:inherit; }
+  .tile .ic{ font-size:24px; line-height:1.15; } .tile .nm{ font-weight:800; font-size:14px; }
+  .tile .sm{ font-size:10.5px; color:#bef264; direction:ltr; font-family:Consolas, monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  .tile.on{ border-color:var(--lime); background:#173a22; box-shadow:0 0 10px #a3e63555; }
+  .msec, .sbb{ display:grid; grid-template-rows:0fr; transition:grid-template-rows .32s ease; }
+  .msec.open, .sub.open > .sbb{ grid-template-rows:1fr; }
+  .msec > .in, .sbb > .in{ overflow:hidden; min-height:0; }
+  .mpad{ padding:2px 0 8px; }
+  .sub{ border:1px solid #a3e63533; border-radius:11px; margin:0 0 8px; background:rgba(22,52,30,.55); }
+  .sbh{ width:100%; display:flex; justify-content:space-between; align-items:center; background:none; border:none; color:var(--lime);
+        font-weight:800; font-size:14.5px; padding:10px 12px; cursor:pointer; font-family:inherit; direction:rtl; }
+  .sbh::after{ content:'▾'; font-size:15px; transition:transform .3s; }
+  .sub.open > .sbh::after{ transform:rotate(180deg); }
+  .pad{ padding:0 10px 10px; }
+  .sbt{ color:var(--lime); font-weight:800; font-size:14px; margin:12px 4px 2px; }
+  .cells{ display:grid; grid-template-columns:repeat(3, 1fr); gap:7px; margin:6px 0; }
+  .cell{ display:flex; flex-direction:column; gap:4px; background:rgba(0,0,0,.25); border:1px solid rgba(0,0,0,.55); border-radius:10px; padding:5px;
+         box-shadow:inset 0 2px 5px rgba(0,0,0,.6), 0 1px 0 rgba(163,230,53,.10); min-width:0; }
+  .cell .cl{ display:flex; flex-direction:column; align-items:center; line-height:1.2; }
+  .cell .cl .en{ color:#bef264; font-family:Consolas, monospace; font-weight:800; font-size:13px; direction:ltr; white-space:nowrap; }
+  .cell .cl .ar{ font-size:10.5px; color:#d9f99dcc; white-space:nowrap; }
+  .cell select{ height:38px; text-align:center; text-align-last:center; font-size:15px; font-weight:700; padding:0 2px; }
+  .cell .fh{ height:38px; }
+  .cell.dis{ opacity:.35; pointer-events:none; }
+  .cgrp .cells{ margin:6px 4px; }
+  #ocrStatus:empty, .sh-note:empty{ display:none; }
+  @media (max-width: 820px){
+    .tiles, .mpad{ max-width:370px; margin-left:auto; margin-right:auto; }
+    .tiles{ top:-10px; }
+  }
 </style>
 </head>
 <body>
@@ -244,61 +278,66 @@
 <div id="app">
   <!-- ======= لوحة التحكم ======= -->
   <aside id="panel">
-    <div class="sec">
-      <div class="sec-h"><h2>استخراج الفحص (OCR)</h2></div>
-      <div class="ocr-btns">
-        <label class="cam">📷 تصوير<input type="file" id="ocrCam" accept="image/*" capture="environment"></label>
-        <label class="att">📄 إرفاق<input type="file" id="ocrFile" accept="image/*"></label>
-      </div>
-      <div id="ocrStatus">صوّر الروشتة أو ارفع صورتها وهتتملى القيم تلقائياً</div>
-      <textarea id="ocrText" readonly></textarea>
+    <div class="tiles">
+      <button class="tile on" data-m="mRx"><span class="ic">📋</span><span class="nm">الروشتة</span><span class="sm" id="smRx"></span></button>
+      <button class="tile" data-m="mLens"><span class="ic">🔍</span><span class="nm">العدسة</span><span class="sm" id="smLens"></span></button>
+      <button class="tile" data-m="mFrame"><span class="ic">👓</span><span class="nm">الفريم</span><span class="sm" id="smFrame"></span></button>
     </div>
-
-    <div class="sec">
-      <div class="sec-h"><h2>مقاسات النظر (RX) والمسافة الحدقية</h2><button class="rst" data-reset="rx" title="إعادة القسم">🔄</button></div>
-      <div class="lrow"><b>المسافة الكلية PD</b><select id="pd"></select></div>
-      <div class="prow">
-        <div>يمين OD<select id="pdR"></select></div>
-        <div>يسار OS<select id="pdL"></select></div>
-      </div>
-      <div id="ocCtrl"></div>
-      <div class="grid2" id="ocBtns"></div>
-      <div class="cgrp"><div class="cgrp-h"><span>👁️ العين اليمنى</span><span class="en">OD</span></div><div id="eyeR"></div></div>
-      <div class="cgrp"><div class="cgrp-h"><span>👁️ العين اليسرى</span><span class="en">OS</span></div><div id="eyeL"></div></div>
-    </div>
-
-    <div class="sec">
-      <div class="sec-h"><h2>العدسة (Index & Design)</h2><button class="rst" data-reset="lens" title="إعادة القسم">🔄</button></div>
-      <div id="lensCtrls"></div>
+    <div class="msec open" id="mRx"><div class="in"><div class="mpad">
+      <div class="sub"><button class="sbh"><span>📷 قراءة الروشتة</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="ocr-btns">
+          <label class="cam">📷 تصوير<input type="file" id="ocrCam" accept="image/*" capture="environment"></label>
+          <label class="att">🖼️ من الاستديو<input type="file" id="ocrFile" accept="image/*"></label>
+        </div>
+        <div id="ocrStatus"></div>
+        <textarea id="ocrText" readonly></textarea>
+      </div></div></div></div>
+      <div class="sub open"><button class="sbh"><span>👁️ مقاسات النظر</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="cgrp"><div class="cgrp-h"><span>العين اليمنى</span><span class="en">OD</span></div><div class="cells" id="eyeR"></div></div>
+        <div class="cgrp"><div class="cgrp-h"><span>العين اليسرى</span><span class="en">OS</span></div><div class="cells" id="eyeL"></div></div>
+      </div></div></div></div>
+      <div class="sub"><button class="sbh"><span>↔️ المسافة الحدقية</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="cells"><div class="cell"><div class="cl"><span class="en">PD</span><span class="ar">الكلية</span></div><select id="pd"></select></div><div class="cell"><div class="cl"><span class="en">R · OD</span><span class="ar">يمين</span></div><select id="pdR"></select></div><div class="cell"><div class="cl"><span class="en">L · OS</span><span class="ar">يسار</span></div><select id="pdL"></select></div></div>
+      </div></div></div></div>
+    </div></div></div>
+    <div class="msec" id="mLens"><div class="in"><div class="mpad">
+      <div class="cells" id="lensCtrls"><div class="cell"><div class="cl"><span class="en">AR</span><span class="ar">لون الطبقة</span></div><select id="ar"><option value="green">أخضر</option><option value="purple">بنفسجي</option><option value="blue">أزرق</option><option value="none">بدون</option></select></div></div>
+      <div class="sbt">🔬 تصميم العدسة</div>
       <div class="grid2" id="designBtns"></div>
-      <div class="lrow"><span>لون طبقة AR</span>
-        <select id="ar"><option value="green">أخضر</option><option value="purple">بنفسجي</option><option value="blue">أزرق</option><option value="none">بدون</option></select>
-      </div>
-    </div>
-
-    <div class="sec">
-      <div class="sec-h"><h2>الإطار (Frame Style)</h2><button class="rst" data-reset="style" title="إعادة القسم">🔄</button></div>
-      <div class="grid2" id="frameBtns"></div>
-      <div class="sw-h">شكل العدسة: <b id="shName"></b></div>
-      <div id="shapes"></div>
-      <div class="sw-h">لون الإطار: <b id="swName"></b></div>
-      <div id="swatches"></div>
-    </div>
-
-    <div class="sec">
-      <div class="sec-h"><h2>نظام الإطار (Boxing System)</h2><button class="rst" data-reset="frame" title="إعادة القسم">🔄</button></div>
-      <div class="sh-btns" style="margin:4px auto 6px">
-        <label class="sh-up">📷 صوّر الذراع<input type="file" id="armCam" accept="image/*" capture="environment"></label>
-        <label class="sh-up alt">🖼️ من الاستديو<input type="file" id="armFile" accept="image/*"></label>
-      </div>
-      <div class="sh-note" id="armNote" style="margin-bottom:6px">صوّر الكتابة اللي جوه ذراع الفريم (زي ‎52□18-140) وهتتملى المقاسات لوحدها</div>
-      <div id="frameCtrls"></div>
-      <div class="chks">
-        <span class="chk"><input type="checkbox" id="showFrame"><label for="showFrame">إظهار الإطار</label></span>
-        <span class="chk"><input type="checkbox" id="showGC"><label for="showGC">🔵 المركز الهندسي</label></span>
-        <span class="chk"><input type="checkbox" id="showOC"><label for="showOC">🔴 مركز العميل البصري</label></span>
-      </div>
-    </div>
+    </div></div></div>
+    <div class="msec" id="mFrame"><div class="in"><div class="mpad">
+      <div class="sub open"><button class="sbh"><span>👓 نوع الإطار</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="grid2" id="frameBtns"></div>
+      </div></div></div></div>
+      <div class="sub"><button class="sbh"><span>⬭ شكل العدسة</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="sw-h">الشكل: <b id="shName"></b></div>
+        <div id="shapes"></div>
+      </div></div></div></div>
+      <div class="sub"><button class="sbh"><span>🎨 لون الإطار</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="sw-h">اللون: <b id="swName"></b></div>
+        <div id="swatches"></div>
+      </div></div></div></div>
+      <div class="sub"><button class="sbh"><span>📐 مقاسات الإطار</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="sh-btns" style="margin:2px auto 6px">
+          <label class="sh-up">📷 صوّر الذراع<input type="file" id="armCam" accept="image/*" capture="environment"></label>
+          <label class="sh-up alt">🖼️ من الاستديو<input type="file" id="armFile" accept="image/*"></label>
+        </div>
+        <div class="sh-note" id="armNote"></div>
+        <div class="cells" id="boxCells"></div>
+      </div></div></div></div>
+      <div class="sub"><button class="sbh"><span>🕶️ وضع الفريم على الوش</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="cells" id="fitCells"></div>
+      </div></div></div></div>
+      <div class="sub"><button class="sbh"><span>🎯 ارتفاع المركز</span></button><div class="sbb"><div class="in"><div class="pad">
+        <div class="cells" id="ocCtrl"></div>
+        <div class="grid2" id="ocBtns"></div>
+        <div class="chks">
+          <span class="chk"><input type="checkbox" id="showFrame"><label for="showFrame">إظهار الإطار</label></span>
+          <span class="chk"><input type="checkbox" id="showGC"><label for="showGC">🔵 المركز الهندسي</label></span>
+          <span class="chk"><input type="checkbox" id="showOC"><label for="showOC">🔴 مركز العميل</label></span>
+        </div>
+      </div></div></div></div>
+    </div></div></div>
   </aside>
 
   <!-- ======= منطقة العرض ======= -->
@@ -347,10 +386,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 const FRAME_COLORS = { plastic:'#1d1d1f', metal:'#c8a24a', halfrim:'#3a3f47', rimless:'#b8bec7' };
 const DEFAULTS = {
   R:{ sph:0, cyl:0, axis:0 }, L:{ sph:0, cyl:0, axis:0 },
-  index:1.60, frame:'plastic', swatch:'pl_black_g', shape:'rectangle',
-  A:54, B:40, DBL:18, depth:3.5, design:'aspheric',
+  index:1.50, frame:'plastic', swatch:'pl_black_g', shape:'rectangle',
+  A:54, B:40, DBL:18, depth:3.5, design:'spheric',
   pd:60.0, pdR:30.0, pdL:30.0,
-  wrap:5, panto:8, ar:'green', showFrame:true, showOC:true, showGC:true, ocMode:'center', ocManual:0
+  wrap:0, panto:0, ar:'green', showFrame:true, showOC:true, showGC:true, ocMode:'center', ocManual:0
 };
 let state = structuredClone(DEFAULTS);
 
@@ -990,7 +1029,7 @@ function rebuild(){
   renderStats();
   hideErr();
 }
-function requestRebuild(){ applyMaterials(); needsRebuild = true; }
+function requestRebuild(){ applyMaterials(); needsRebuild = true; if (typeof refreshTiles === 'function') try{ refreshTiles(); }catch(e){} }
 
 /* =====================================================================
    8) CAMERA VIEWS (safe radius ≈ 215 mm)
@@ -1058,18 +1097,15 @@ fillSelect($('pdL'), range(20, 45, 0.5), mm);
 const refreshers = [];
 // Generic control: [label] [slider] [dropdown]. Both drive the same list of allowed values.
 function makeCtrl(container, label, values, fmt, get, set, id){
-  const row = document.createElement('div'); row.className = 'ctrl'; if (id) row.id = id;
+  const row = document.createElement('div'); row.className = 'cell'; if (id) row.id = id;
   const [ar, en] = label.split('|');
-  row.innerHTML = `<div class="lh"><span class="ar">${ar}</span><span class="en">${en || ''}</span></div>
-    <div class="body"><input type="range" min="0" max="${values.length - 1}" step="1"><select></select></div>`;
+  row.innerHTML = `<div class="cl"><span class="en">${en || ''}</span><span class="ar">${ar}</span></div><select></select>`;
   container.appendChild(row);
-  const rg = row.querySelector('input'), sel = row.querySelector('select');
+  const sel = row.querySelector('select');
   sel.innerHTML = values.map((v, i) => `<option value="${i}">${fmt(v)}</option>`).join('');
   const nearest = v => { let bi = 0, bd = Infinity; values.forEach((x, i) => { const d = Math.abs(x - v); if (d < bd){ bd = d; bi = i; } }); return bi; };
-  const refresh = () => { const i = nearest(get()); rg.value = i; sel.value = i; };
-  const apply = i => { set(values[i]); rg.value = i; sel.value = i; refreshers.forEach(f => f()); requestRebuild(); };
-  rg.addEventListener('input', () => apply(+rg.value));
-  sel.addEventListener('change', () => apply(+sel.value));
+  const refresh = () => { sel.value = nearest(get()); };
+  sel.addEventListener('change', () => { set(values[+sel.value]); refreshers.forEach(f => f()); requestRebuild(); });
   refreshers.push(refresh); refresh();
   return row;
 }
@@ -1091,12 +1127,13 @@ for (const eye of ['R', 'L']){
   makeCtrl(box, 'أسطواني|CYL', range(-6, 0, 0.25), sgn, () => state[eye].cyl, v => state[eye].cyl = v);
   makeCtrl(box, 'المحور|AXIS', range(0, 180, 1), v => v.toFixed(0) + '°', () => state[eye].axis, v => state[eye].axis = v);
 }
-const ocRow = makeCtrl($('ocCtrl'), 'ارتفاع عين العميل مم|Final   ·   FH', range(10, 45, 0.5), v => v.toFixed(1),
+const ocRow = makeCtrl($('ocCtrl'), 'ارتفاع العين|FH', range(10, 45, 0.5), v => v.toFixed(1),
   () => fhMeasured(), v => { state.ocMode = 'manual'; state.ocManual = v - state.B / 2; });
 // Final box: FH after the pantoscopic-tilt correction (−1 mm per 2°) used for the optical centre
-ocRow.classList.add('has-fh');
+const fhCell = document.createElement('div'); fhCell.className = 'cell';
+fhCell.innerHTML = '<div class="cl"><span class="en">FINAL</span><span class="ar">بعد البانتو</span></div>';
 const fhBox = document.createElement('div'); fhBox.className = 'fh'; fhBox.title = 'الارتفاع النهائي بعد تصحيح البانتو';
-ocRow.querySelector('.body').appendChild(fhBox);
+fhCell.appendChild(fhBox); $('ocCtrl').appendChild(fhCell);
 const refreshFH = () => {
   const d = pantoDrop();
   fhBox.innerHTML = `<b>${fhFinal().toFixed(1)}</b><small>${d ? '−' + d.toFixed(1) + ' panto' : 'FINAL mm'}</small>`;
@@ -1104,7 +1141,7 @@ const refreshFH = () => {
 refreshers.push(refreshFH); refreshFH();
 makeBtns($('ocBtns'), [['center', 'GC · Geometric Center'], ['twothirds', 'FH · 2/3 Rule']],
   () => state.ocMode, v => { state.ocMode = v; syncUI(); });
-makeCtrl($('lensCtrls'), 'معامل الانكسار|Index', INDEXES, v => v.toFixed(2), () => state.index, v => state.index = v);
+$('lensCtrls').prepend(makeCtrl($('lensCtrls'), 'معامل الانكسار|Index', INDEXES, v => v.toFixed(2), () => state.index, v => state.index = v));
 makeBtns($('designBtns'), [['aspheric', 'Aspheric'], ['spheric', 'Spheric'], ['freeform', 'FreeForm'], ['double', 'Double Aspheric']],
   () => state.design, v => state.design = v);
 makeBtns($('frameBtns'), [['metal', 'Metal'], ['rimless', 'Rimless'], ['halfrim', 'Half-Rim'], ['plastic', 'Plastic']],
@@ -1137,7 +1174,7 @@ function renderShapes(){
         <label class="sh-up">📷 كاميرا<input type="file" id="frameCam" accept="image/*" capture="environment"></label>
         <label class="sh-up alt">🖼️ من الاستديو<input type="file" id="framePhoto" accept="image/*"></label>
       </div>
-      <div class="sh-note" id="shNote">حط الفريم على ورقة بيضا، وصوّره من فوق بالظبط والموبايل موازي له، والفريم ماليّ الصورة</div></div>`;
+      <div class="sh-note" id="shNote">صوّر الفريم من فوق على ورقة بيضا</div></div>`;
   } else if (shTab){
     row = `<div class="sh-row">${SHAPES[shTab].map(([id, n]) => `<button class="sh ${id === state.shape ? 'on' : ''}" data-sh="${id}" title="${n}">${shapeIcon(id)}</button>`).join('')}</div>`;
   }
@@ -1418,19 +1455,31 @@ function renderSwatches(){
   box.querySelectorAll('.sw').forEach(b => b.addEventListener('click', () => { state.swatch = b.dataset.sw; renderSwatches(); applyMaterials(); }));
   const s = findSwatch(state.swatch); $('swName').textContent = s ? s.name.trim() : '';
 }
-const fc = $('frameCtrls');
-// engraved groups: frame position (Panto, Wrap) · frame depth · boxing dimensions (A, B, DBL)
-const mkGrp = (parent, ar, en) => { const g = document.createElement('div'); g.className = 'cgrp';
-  g.innerHTML = `<div class="cgrp-h"><span>${ar}</span><span class="en">${en}</span></div>`; parent.appendChild(g); return g; };
-const gPos = mkGrp(fc, '🕶️ وضع الفريم على الوش', 'Fit'), gDep = fc;
-const gBox = document.createElement('div');   // appended after depth
-makeCtrl(gPos, 'الميل البانتوسكوبي|Panto', range(0, 20, 2), v => v.toFixed(0) + '°', () => state.panto, v => state.panto = v);
-makeCtrl(gPos, 'زاوية الالتفاف|Wrap', range(0, 20, 1), v => v.toFixed(0) + '°', () => state.wrap, v => state.wrap = v);
-makeCtrl(gDep, 'عمق الإطار مم|Depth', range(2, 6, 0.5), mm, () => state.depth, v => state.depth = v, 'depthRow');
-{ const g = mkGrp(fc, '🔲 أبعاد الإطار', 'Boxing'); gBox.replaceWith && 0; window.__gBox = g; }
-makeCtrl(window.__gBox, 'عرض العدسة|A-Box', range(44, 62, 0.5), mm, () => state.A, v => state.A = v);
-makeCtrl(window.__gBox, 'ارتفاع العدسة|B-Box', range(26, 50, 0.5), mm, () => state.B, v => state.B = v);
-makeCtrl(window.__gBox, 'عرض الجسر|DBL', range(12, 24, 0.5), mm, () => state.DBL, v => state.DBL = v);
+makeCtrl($('fitCells'), 'البانتو|Panto', range(0, 20, 2), v => v.toFixed(0) + '°', () => state.panto, v => state.panto = v);
+makeCtrl($('fitCells'), 'الالتفاف|Wrap', range(0, 20, 1), v => v.toFixed(0) + '°', () => state.wrap, v => state.wrap = v);
+makeCtrl($('fitCells'), 'عمق الإطار|Depth', range(2, 6, 0.5), mm, () => state.depth, v => state.depth = v, 'depthRow');
+makeCtrl($('boxCells'), 'عرض العدسة|A', range(44, 62, 0.5), mm, () => state.A, v => state.A = v);
+makeCtrl($('boxCells'), 'ارتفاع العدسة|B', range(26, 50, 0.5), mm, () => state.B, v => state.B = v);
+makeCtrl($('boxCells'), 'الجسر|DBL', range(12, 24, 0.5), mm, () => state.DBL, v => state.DBL = v);
+
+/* Curtains: one main section open at a time; sub-sections toggle in place */
+document.querySelectorAll('.tile').forEach(t => t.addEventListener('click', () => {
+  const target = $(t.dataset.m), wasOpen = target.classList.contains('open');
+  document.querySelectorAll('.msec').forEach(m => m.classList.remove('open'));
+  document.querySelectorAll('.tile').forEach(x => x.classList.remove('on'));
+  if (!wasOpen){ target.classList.add('open'); t.classList.add('on'); }
+  $('panel').scrollTo({ top:0, behavior:'smooth' });
+}));
+document.querySelectorAll('.sbh').forEach(h => h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+const FRAME_NAMES = { plastic:'Plastic', metal:'Metal', halfrim:'Half-Rim', rimless:'Rimless' };
+const DESIGN_SHORT = { spheric:'Spheric', aspheric:'Aspheric', freeform:'FreeForm', double:'D.Aspheric' };
+function refreshTiles(){
+  const f = v => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(2);
+  $('smRx').textContent = `R ${f(state.R.sph)} · L ${f(state.L.sph)}`;
+  $('smLens').textContent = `${state.index.toFixed(2)} ${DESIGN_SHORT[state.design] || ''}`;
+  $('smFrame').textContent = `${FRAME_NAMES[state.frame] || ''} ${state.A}□${state.DBL}`;
+}
+refreshers.push(refreshTiles);
 
 /* Make every English term / abbreviation in the UI bold and one-two sizes bigger (Arabic text untouched) */
 const EN_RE = /[A-Za-z][A-Za-z0-9\-\/&·↑+.]*(?:[ ]+[A-Za-z0-9\-\/&·↑+.]+)*/g;
@@ -1501,7 +1550,7 @@ $('newBtn').addEventListener('click', () => {
   state = structuredClone(DEFAULTS);
   $('ocrText').value = ''; $('ocrText').style.display = 'none';
   $('ocrFile').value = ''; $('ocrCam').value = '';
-  $('ocrStatus').textContent = 'صوّر الروشتة أو ارفع صورتها وهتتملى القيم تلقائياً';
+  $('ocrStatus').textContent = '';
   if (spinning) setSpin(false);
   syncUI(); requestRebuild(); goView('iso');
 });
