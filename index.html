@@ -419,7 +419,7 @@ const AR_COLORS = { green:0x39ff88, purple:0xb36bff, blue:0x4aa8ff, none:0xfffff
 const canvas = document.getElementById('c');
 const viewport = document.getElementById('viewport');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, /Android|iPhone|iPad/.test(navigator.userAgent) ? 1.75 : 2));
 renderer.setClearColor(0x000000, 0);            // transparent → CSS studio gradient shows through
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1925,10 +1925,16 @@ function resize(){
 new ResizeObserver(resize).observe(viewport);
 window.addEventListener('resize', resize);
 
+let dirtyUntil = performance.now() + 2500;
+const poke = () => { dirtyUntil = performance.now() + 900; };
+['pointerdown', 'pointermove', 'pointerup', 'wheel', 'change', 'input', 'click', 'keydown', 'touchmove'].forEach(ev => document.addEventListener(ev, poke, { capture:true, passive:true }));
+window.addEventListener('resize', poke);
+new ResizeObserver(() => poke()).observe(viewport);
+window.__renders = 0;
 function animate(now){
   requestAnimationFrame(animate);
   if (needsRebuild){
-    needsRebuild = false;
+    needsRebuild = false; poke();
     try { rebuild(); } catch(err){ console.error(err); showErr(err.message); }
   }
   if (tween){
@@ -1938,9 +1944,11 @@ function animate(now){
     if (t >= 1) tween = null;
   }
   const nowS = now / 1000, dt = Math.min(0.1, nowS - (animate.last || nowS)); animate.last = nowS;
-  controls.update(dt);   // frame-rate independent turntable speed (~38 s per turn)
+  const moved = controls.update(dt);   // frame-rate independent turntable speed
+  // Render only when something changes (saves battery and keeps big phones smooth)
+  if (!(moved || tween || spinning || now < dirtyUntil)) return;
   // Two-pass layered render (see BUG FIX #4)
-  renderer.clear();
+  renderer.clear(); window.__renders++;
   camera.layers.set(0); renderer.render(scene, camera);
   camera.layers.set(1); renderer.render(scene, camera);
 }
