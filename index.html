@@ -1573,81 +1573,188 @@ function renderStats(){
 
 /* ---- OCR ---- */
 const snap = (v, st, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v / st) * st));
-/* ===== Offline Rx reading (no Claude): cleanup → Tesseract (block mode) → table-aware parser ===== */
-// Screen photos have moiré stripes: shrink + blur kills them, then stretch contrast and enlarge for the OCR.
-async function prepRxImage(file){
+/* ===== Offline Rx reading (no Claude) — runs fully on the phone =====
+   Pass A: shrink + blur (kills moiré stripes of screen photos) → contrast → enlarge.
+   Pass B (if A misses an eye): sharp version for paper / small print. */
+async function prepRxImage(file, mode = 'A'){
   const bmp = await createImageBitmap(file);
-  const w1 = Math.min(900, bmp.width), h1 = Math.round(bmp.height * w1 / bmp.width);
+  const target = mode === 'A' ? 900 : 1800;
+  const w1 = Math.min(target, mode === 'A' ? bmp.width : bmp.width * 2), h1 = Math.round(bmp.height * w1 / bmp.width);
   const c1 = document.createElement('canvas'); c1.width = w1; c1.height = h1;
-  const x1 = c1.getContext('2d'); x1.filter = 'grayscale(1) blur(1.2px)'; x1.drawImage(bmp, 0, 0, w1, h1);
+  const x1 = c1.getContext('2d'); x1.filter = mode === 'A' ? 'grayscale(1) blur(1.2px)' : 'grayscale(1)'; x1.drawImage(bmp, 0, 0, w1, h1);
   const d = x1.getImageData(0, 0, w1, h1), p = d.data, hist = new Uint32Array(256);
   for (let i = 0; i < p.length; i += 4) hist[p[i]]++;
   const n = w1 * h1; let lo = 0, hi = 255, acc = 0;
-  for (; lo < 255 && (acc += hist[lo]) < n * .02; lo++);
-  acc = 0; for (; hi > 0 && (acc += hist[hi]) < n * .02; hi--);
+  for (; lo < 255 && (acc += hist[lo]) < n * .003; lo++);          // darkest ink
+  acc = 0; for (; hi > 0 && (acc += hist[hi]) < n * .05; hi--);      // paper / screen white
+  if (hi - lo < 90) lo = Math.max(0, hi - 160);                      // faint or almost-empty image: don't blow it out
   const k = 255 / Math.max(1, hi - lo);
   for (let i = 0; i < p.length; i += 4){ const v = Math.max(0, Math.min(255, (p[i] - lo) * k)); p[i] = p[i + 1] = p[i + 2] = v; }
   x1.putImageData(d, 0, 0);
+  if (mode !== 'A') return c1;
   const c2 = document.createElement('canvas'); c2.width = w1 * 2; c2.height = h1 * 2;
   const x2 = c2.getContext('2d'); x2.imageSmoothingQuality = 'high'; x2.drawImage(c1, 0, 0, c2.width, c2.height);
   return c2;
 }
-// Finds minus signs the OCR dropped: looks just left of each unsigned number for a short horizontal stroke.
+// Recovers the sign of each power value from the image itself (OCR often drops a small "-" or reads "+" as "4").
+// Looks at the start of the number (and just left of it): a short flat stroke in the middle band = "-",
+// stroke · thin tall bar · stroke = "+". Only decimal powers (x.xx) are checked, never the axis.
 function rebuildWithSigns(data, canvas){
   const ctx = canvas.getContext('2d'), W = canvas.width, H = canvas.height;
   const img = ctx.getImageData(0, 0, W, H).data, g = (x, y) => img[(y * W + x) * 4];
-  const hasDash = (b, prevX1) => {
-    const h = b.y1 - b.y0; if (h < 6) return false;
-    const xs = Math.max(0, Math.round(b.x0 - 1.1 * h), prevX1 + 1), xe = b.x0 - 1; if (xe - xs < 3) return false;
-    const ins = []; for (let y = b.y0; y < b.y1; y += 2) for (let x = b.x0; x < b.x1; x += 2) ins.push(g(x, y));
-    ins.sort((a, c) => a - c); const ink = ins[Math.floor(ins.length * .05)];
-    const bgs = []; for (let y = b.y0; y < b.y1; y++) for (let x = xs; x < xe; x++) bgs.push(g(x, y));
-    bgs.sort((a, c) => a - c); const bg = bgs[Math.floor(bgs.length * .8)];
-    if (bg - ink < 40) return false;
-    const thr = bg - 0.3 * (bg - ink); let best = 0;
-    for (let y = Math.round(b.y0 + .1 * h); y < b.y0 + .8 * h; y++){
-      let run = 0; for (let x = xs; x < xe; x++){ if (g(x, y) < thr){ run++; if (run > best) best = run; } else run = 0; }
+  const signAt = (b, prevX1) => {
+    const h = b.y1 - b.y0; if (h < 8) return '';
+    const xs = Math.max(0, Math.round(b.x0 - 1.1 * h), prevX1 + 1), xe = Math.min(b.x1, Math.round(b.x0 + 0.8 * h), W);
+    const ya = Math.max(0, b.y0 - Math.round(.15 * h)), yb = Math.min(H, b.y1 + Math.round(.1 * h));
+    if (xe - xs < 4) return '';
+    const vals = []; for (let y = b.y0; y < b.y1; y++) for (let x = xs; x < xe; x++) vals.push(g(x, y));
+    vals.sort((a, c) => a - c);
+    const ink = vals[Math.floor(vals.length * .02)], bg = vals[Math.floor(vals.length * .7)];
+    if (bg - ink < 40) return '';
+    const thr = bg - 0.45 * (bg - ink), runs = [];
+    for (let x = xs; x < xe; x++){
+      let top = -1, bot = -1;
+      for (let y = ya; y < yb; y++) if (g(x, y) < thr){ if (top < 0) top = y; bot = y; }
+      let c = 0;
+      if (top >= 0){ const t = (top - b.y0) / h, u = (bot - b.y0) / h; c = (t >= 0.2 && u <= 0.85 && u - t <= 0.32) ? 1 : 2; }
+      if (runs.length && runs[runs.length - 1][0] === c) runs[runs.length - 1][1]++; else runs.push([c, 1]);
     }
-    return best / h > 0.28;
+    while (runs.length && runs[0][0] === 0) runs.shift();
+    if (!runs.length || runs[0][0] !== 1) return '';
+    const a = runs[0][1] / h;
+    if (runs.length >= 3 && runs[1][0] === 2 && runs[1][1] <= 0.2 * h && runs[2][0] === 1 && runs[2][1] >= 0.06 * h) return '+';
+    const gap = runs.length >= 2 && runs[1][0] === 0;
+    return ((gap && a >= 0.17) || a >= 0.25) ? '-' : '';
   };
   const lines = [];
   for (const bl of data.blocks || []) for (const pa of bl.paragraphs || []) for (const li of pa.lines || []){
     let prevX1 = -1;
     lines.push(li.words.map(w => {
-      let t = w.text;
-      if (/^\d+(?:[.,]\d+)?$/.test(t) && hasDash(w.bbox, prevX1)) t = '-' + t;
+      let t = w.text.replace(/^[–—~“”"'`’‘_]/, '-');
+      if (/^[+-]\d{3}$/.test(t) && +t.slice(1) % 25 === 0) t = t[0] + t[1] + '.' + t.slice(2);       // "+100" → "+1.00"
+      if (/^\d{1,2}[.,]\d{2}$/.test(t)){
+        const s = signAt(w.bbox, prevX1);
+        if (/^4\d[.,]\d{2}$/.test(t)) t = '+' + t.slice(1);                                          // "42.25" = "+2.25"
+        else if (s) t = s + t;
+      }
       prevX1 = w.bbox.x1; return t;
     }).join(' '));
   }
   return lines.join('\n');
 }
-// Reads each eye row as: SPH, CYL, AXIS, (ADD), …, PD. Unsigned SPH = plus (slips print "-" only for minus);
-// CYL is always minus-cyl on printed slips.
+// Reads an Rx from OCR text — works for the common layouts:
+//   table with header (SPH CYL AXIS ADD … PD) and one row per eye, blank cells as "-"
+//   transposed table (rows SPH / CYL / AXIS, columns OD OS)
+//   inline "R: -2.00 / -0.50 x 180", "OD -2.00 DS", "Plano"
+// Signs: "-" = minus, "+" or no sign = plus (slips print a sign only for minus). Plus CYL is transposed later.
 function parseRx(raw){
-  const text = String(raw || '').replace(/,/g, '.').replace(/[−–—~“”"'`’‘_]/g, '-').toUpperCase();
+  let text = String(raw || '').toUpperCase()
+    .replace(/[−–—~“”"'`’‘_]/g, '-')
+    .replace(/(\d),(\d)/g, '$1.$2')
+    .replace(/O\s?\.\s?D\s?\.?/g, 'OD ').replace(/O\s?\.\s?S\s?\.?/g, 'OS ')
+    .replace(/\b(PLANO|PLAN0|PL)\b/g, ' 0.00 ')
+    .replace(/(\d)[ \t]*(DS|D\.S\.?|SPH)\b/g, '$1 ')
+    .replace(/°/g, ' ')
+    .replace(/(\d)[ \t]*[X×*][ \t]*(\d)/g, '$1 X$2').replace(/[ \t][X×*][ \t]*(\d)/g, ' X$1');
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const out = {}, hasPdCol = /\bP\.?D\b|\bPO\b/.test(text);
-  const eyeOf = l => /^(\W*)(OD|0D|QD|R|RE|RT|RIGHT)\b/.test(l) ? 'R' : (/^(\W*)(OS|0S|QS|L|LE|LT|LEFT)\b/.test(l) ? 'L' : null);
-  const toks = l => [...l.replace(/^(\W*)(OD|0D|QD|OS|0S|QS|RIGHT|LEFT|RE|LE|RT|LT|R|L)\b/, '').matchAll(/([+-]?)\s?(\d{1,3}(?:\.\d{1,2})?)/g)]
-    .map(m => ({ s:m[1], v:parseFloat(m[2]), dec:m[2].includes('.') }));
-  const signed = (t, cylMode) => t.v === 0 ? 0 : (t.s === '-' ? -t.v : t.s === '+' ? t.v : (cylMode ? -t.v : t.v));   // CYL: unsigned = minus, explicit + = plus (transposed later)
-  for (const line of lines){
-    const e = eyeOf(line); if (!e || out[e]) continue;
-    const t = toks(line); if (t.length < 1) continue;
-    let i = 0; const r = { sph:0, cyl:0, axis:0 };
-    if (t[i] && t[i].v <= 25){ r.sph = signed(t[i]); i++; }
-    if (t[i] && t[i].v <= 10 && (t[i].dec || t[i].v === 0)){ r.cyl = signed(t[i], true); i++; }
-    if (t[i] && Number.isInteger(t[i].v) && t[i].v <= 180 && !t[i].dec){ r.axis = t[i].v; i++; }
-    if (r.axis > 180) r.axis = 0;
-    if (t[i] && t[i].dec && t[i].v <= 4) i++;                       // ADD
-    const last = t[t.length - 1];
-    if (hasPdCol && t.length - 1 >= i && last && last.v >= 20 && last.v <= 40) r.pd = last.v;
-    out[e] = r;
+  const out = {};
+
+  // header → column order
+  const COLS = [['SPH', /^(SPH|SPHERE|SPHERICAL|SPN|5PH)$/], ['CYL', /^(CYL|CYLINDER|CYLINDRICAL|CY1)$/], ['AX', /^(AXIS|AX|AXE|AXI5)$/],
+                ['ADD', /^(ADD|ADO|AD)$/], ['PRISM', /^(PRISM|PR)$/], ['BASE', /^(BASE|BS)$/], ['SH', /^(SH|SEG|HT|FH)$/],
+                ['PD', /^(PD|P\.D\.?|PO|IPD|MPD)$/], ['VA', /^(VA|V\.A\.?|VISION)$/]];
+  const colOf = w => (COLS.find(c => c[1].test(w)) || [null])[0];
+  let header = null;
+  for (const l of lines){
+    const cols = l.split(/[\s|:]+/).map(colOf).filter(Boolean);
+    if (cols.includes('SPH') && cols.length >= 2){ header = cols; break; }
   }
-  if (out.R) out.R.axis = out.R.cyl ? out.R.axis : 0;
-  if (out.L) out.L.axis = out.L.cyl ? out.L.axis : 0;
-  if (out.R?.pd) out.pdR = out.R.pd; if (out.L?.pd) out.pdL = out.L.pd;
-  if (!out.pdR && !out.pdL){ const m = text.match(/(?:I\.?P\.?D|P\.?D)\.?[^0-9\n]{0,8}(\d{2}(?:\.\d)?)/); if (m && +m[1] >= 50 && +m[1] <= 80) out.pd = +m[1]; }
+
+  const EYE_R = /^(OD|0D|QD|OP|0P|OO|R|RE|RT|RIGHT|RIGHTEYE|DROITE)$/, EYE_L = /^(OS|0S|QS|O5|L|LE|LT|LEFT|LEFTEYE|GAUCHE)$/;
+  const eyeOf = l => {
+    const w = l.replace(/^[^A-Z0-9]+/, '').split(/[\s:.\-|(]+/)[0];
+    if (EYE_R.test(w)) return 'R'; if (EYE_L.test(w)) return 'L';
+    const m1 = l.match(/^\W*[A-Z]?(R|L)\s*:/); if (m1) return m1[1] === 'R' ? 'R' : 'L';
+    if (/\bRIGHT\b/.test(l)) return 'R'; if (/\bLEFT\b/.test(l)) return 'L';
+    return null;
+  };
+  const cells = l => {
+    const body = l.replace(/^[^A-Z0-9+-]*[A-Z]?(OD|0D|QD|OP|0P|OO|OS|0S|QS|O5|RIGHT\s*EYE|LEFT\s*EYE|RIGHT|LEFT|RE|LE|RT|LT|R|L)\b[:.]?/, ' ');
+    const t = [];
+    for (const m of body.matchAll(/(X)?([+-]?)(\d{1,3}(?:\.\d{1,2})?)|(?:^|\s)(-{1,3}|:|\.)(?=\s|$)/g)){
+      if (m[4]) t.push(null);   // blank cell
+      else t.push({ s:m[2], v:parseFloat(m[3]), dec:m[3].includes('.'), x:!!m[1] });
+    }
+    return t;
+  };
+  const sg = t => !t || t.v === 0 ? 0 : (t.s === '-' ? -t.v : t.v);
+
+  const readRow = (l) => {
+    const cut = l.split(/\bADD\b|\bNEAR\b|\bREADING\b/)[0];
+    const t = cells(cut), r = { sph:0, cyl:0, axis:0 };
+    const nums = t.filter(Boolean);
+    if (!nums.length) return null;
+    // 1) header mapping when the cell count matches the header
+    if (header && t.length === header.length){
+      header.forEach((c, i) => {
+        const x = t[i]; if (!x) return;
+        if (c === 'SPH' && x.v <= 30) r.sph = sg(x);
+        else if (c === 'CYL' && x.v <= 10) r.cyl = sg(x);
+        else if (c === 'AX' && x.v <= 180) r.axis = Math.round(x.v);
+        else if (c === 'PD' && x.v >= 20 && x.v <= 80) r.pd = x.v;
+      });
+      return r;
+    }
+    // 2) explicit "x180" axis
+    const ax = nums.find(x => x.x && x.v <= 180);
+    const rest = nums.filter(x => x !== ax);
+    let i = 0;
+    if (rest[i] && rest[i].v <= 30 && (rest[i].dec || rest[i].v === 0)){ r.sph = sg(rest[i]); i++; }
+    if (rest[i] && rest[i].v <= 10 && (rest[i].dec || rest[i].v === 0)){ r.cyl = sg(rest[i]); i++; }
+    if (ax) r.axis = Math.round(ax.v);
+    else if (rest[i] && !rest[i].dec && rest[i].v <= 180){ r.axis = rest[i].v; i++; }
+    if (rest[i] && rest[i].dec && rest[i].v <= 4) i++;                  // ADD
+    const last = rest[rest.length - 1];
+    if (header && header.includes('PD') && rest.length > i && last.v >= 20 && last.v <= 40) r.pd = last.v;
+    else if (!header && rest.length > i && last.v >= 20 && last.v <= 40) r.pdGuess = last.v;   // header unreadable: trailing 20–40 = mono PD
+    return r;
+  };
+
+  // A) one row per eye
+  for (const l of lines){
+    if (/\bNEAR\b|\bREADING\b|\bINT\b/.test(l) && !/\bDIST/.test(l)) continue;
+    const e = eyeOf(l); if (!e || out[e]) continue;
+    const r = readRow(l); if (r) out[e] = r;
+  }
+  // B) transposed table: rows named SPH / CYL / AXIS with values for R then L
+  if (!out.R && !out.L){
+    const tr = { R:{ sph:0, cyl:0, axis:0 }, L:{ sph:0, cyl:0, axis:0 } }; let hit = 0;
+    for (const l of lines){
+      const c = colOf(l.split(/[\s:|]+/)[0]); if (!c) continue;
+      const t = cells(l.replace(/^\S+/, ' ')).filter(Boolean); if (t.length < 2) continue;
+      if (c === 'SPH'){ tr.R.sph = sg(t[0]); tr.L.sph = sg(t[1]); hit++; }
+      else if (c === 'CYL'){ tr.R.cyl = sg(t[0]); tr.L.cyl = sg(t[1]); hit++; }
+      else if (c === 'AX'){ tr.R.axis = Math.round(t[0].v); tr.L.axis = Math.round(t[1].v); hit++; }
+      else if (c === 'PD'){ if (t[0].v <= 40) { tr.R.pd = t[0].v; tr.L.pd = t[1].v; } }
+    }
+    if (hit){ out.R = tr.R; out.L = tr.L; }
+  }
+  // C) no eye labels: first two Rx-looking rows = R then L
+  if (!out.R && !out.L){
+    const rows = lines.filter(l => !/[A-Z]{3,}/.test(l.replace(/\bX\d/g, ''))).map(readRow).filter(r => r && (r.sph || r.cyl));
+    if (rows[0]) out.R = rows[0]; if (rows[1]) out.L = rows[1];
+  }
+  for (const e of ['R', 'L']) if (out[e]){ if (!out[e].cyl) out[e].axis = 0; if (out[e].axis > 180) out[e].axis = 0; }
+  if (out.R && out.L && out.R.pdGuess && out.L.pdGuess){ out.R.pd = out.R.pdGuess; out.L.pd = out.L.pdGuess; }
+  for (const e of ['R', 'L']) if (out[e]) delete out[e].pdGuess;
+  if (out.R && out.R.pd) out.pdR = out.R.pd; if (out.L && out.L.pd) out.pdL = out.L.pd;
+  if (out.pdR && out.pdL && out.pdR > 40){ out.pd = out.pdR; delete out.pdR; delete out.pdL; }
+  // PD written on its own: "PD 63", "PD: 63/60", "PD R 32 L 31.5"
+  if (!out.pdR && !out.pdL){
+    const mr = text.match(/P\.?D[^\n]{0,12}\b(?:R|OD|RIGHT)\b[^0-9\n]{0,4}(\d{2}(?:\.\d)?)/), ml = text.match(/P\.?D[^\n]{0,24}\b(?:L|OS|LEFT)\b[^0-9\n]{0,4}(\d{2}(?:\.\d)?)/);
+    if (mr && ml && +mr[1] <= 40){ out.pdR = +mr[1]; out.pdL = +ml[1]; }
+    else { const m = text.match(/(?:I\.?P\.?D|P\.?D)\b[^0-9\n]{0,8}(\d{2}(?:\.\d)?)/); if (m && +m[1] >= 50 && +m[1] <= 80) out.pd = +m[1]; }
+  }
   return out;
 }
 window.__prepRx = prepRxImage; window.__parseRx = parseRx; window.__signs = rebuildWithSigns;
@@ -1743,13 +1850,19 @@ async function runOCR(file){
       logger: m => { if (m.status === 'recognizing text') st.textContent = `🔎 جاري القراءة ${Math.round(m.progress * 100)}%`; }
     });
     await worker.setParameters({ tessedit_pageseg_mode:'6', preserve_interword_spaces:'1' });
-    const cv = await prepRxImage(file);
-    const { data } = await worker.recognize(cv, {}, { text:true, blocks:true });
+    const pass = async mode => {
+      const cv = await prepRxImage(file, mode);
+      const { data } = await worker.recognize(cv, {}, { text:true, blocks:true });
+      let t = data.text; try{ t = rebuildWithSigns(data, cv) || data.text; }catch(e){ console.error(e); }
+      const rx = parseRx(t);
+      return { t, rx, score:(rx.R ? 1 : 0) + (rx.L ? 1 : 0) };
+    };
+    let best = await pass('A');
+    if (best.score < 2){ st.textContent = '🔎 بجرب قراءة تانية أوضح…'; const b2 = await pass('B'); if (b2.score > best.score) best = b2; }
     await worker.terminate();
-    let text = data.text;
-    try{ text = rebuildWithSigns(data, cv) || data.text; }catch(e){ console.error(e); }
+    const text = best.t;
     $('ocrText').value = text; $('ocrText').style.display = 'block';
-    const n = applyRx(parseRx(text));
+    const n = applyRx(best.rx);
     if (n){
       document.querySelectorAll('#mRx .sub').forEach(x => { if (/مقاسات النظر|المسافة الحدقية/.test(x.textContent)) x.classList.add('open'); });
       st.textContent = `✅ اتقرت ${n} عين${transposed ? ' • السلندر كان موجب واتحوّر لسالب' : ''} — راجع القيم قبل الاعتماد`;
