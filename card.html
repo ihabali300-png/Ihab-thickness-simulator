@@ -146,6 +146,7 @@
   .qr-bot{ padding:14px; display:flex; justify-content:center; }
   .qr-photo{ position:relative; overflow:hidden; background:#173a22; color:#ecfccb; border:1px solid var(--lime); border-radius:10px; padding:10px 18px; font-weight:800; }
   .qr-photo input{ position:absolute; inset:0; opacity:0; }
+  #status .fld{ display:inline-block; margin:6px 6px 0; color:#0b1a0f; background:var(--lime); border-radius:8px; padding:4px 10px; font-weight:800; font-size:13px; text-decoration:none; }
 </style>
 </head>
 <body>
@@ -377,6 +378,8 @@ $('editCancel').addEventListener('click', () => { resetForm(); setStatus('اتل
 $('resetBtn').addEventListener('click', () => { resetForm(); setStatus('↺ كل الخانات اتمسحت'); });
 
 function setStatus(msg, err = false){ const s = $('status'); s.textContent = msg; s.classList.toggle('err', err); }
+const DRIVE_FOLDER = 'https://drive.google.com/drive/search?q=' + encodeURIComponent('title:"IHAB Fitting Attachments"');
+function folderLink(){ const a = document.createElement('a'); a.href = DRIVE_FOLDER; a.target = '_blank'; a.rel = 'noopener'; a.className = 'fld'; a.textContent = '📂 افتح فولدر المرفقات'; $('status').appendChild(a); }
 
 /* ---- Google Sheet through the owner's Apps Script web app (works outside Claude) ---- */
 const API = 'https://script.google.com/macros/s/AKfycbyIh908F6WWFNy6TtwRHDuvVGy5oRUvIZr2bUjM1h-RkbzJ6oLZmS9b3FLQ3Pc-_s7h/exec';
@@ -410,7 +413,9 @@ $('saveBtn').addEventListener('click', async () => {
       const row = [editKey[0], code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim(), links.join(' | ')];
       const j = await api('update', { key:editKey, row });
       if (!j.updated) throw new Error('not found');
-      resetForm(); allRows = null; setStatus('✅ التعديل اتحفظ في الشيت');
+      const nNew = links.length - attSaved.length;
+      resetForm(); allRows = null; setStatus(`✅ التعديل اتحفظ في الشيت${nNew > 0 ? ` • ${nNew} مرفق جديد اترفع على Drive ✔` : ''}`);
+      if (nNew > 0) folderLink();
     } catch(e){ console.error(e); setStatus(e.message === 'unknown action' ? '⚠️ كود الشيت لسه قديم — حدّثه وانشره إصدار جديد' : '⚠️ التعديل متحفظش — اتأكد من النت', true); }
     finally{ btn.disabled = false; }
     return;
@@ -426,7 +431,9 @@ $('saveBtn').addEventListener('click', async () => {
   resetForm(); allRows = null;
   try{
     const n = await flushQ();
-    setStatus(n > 1 ? `✅ اتحفظ في الشيت (ومعاه ${n - 1} كانوا مستنيين النت)` : '✅ اتحفظ في الشيت — الخانات رجعت صفر');
+    const up = links.length ? ` • ${links.length === 1 ? 'مرفق واحد اترفع' : links.length + ' مرفقات اترفعوا'} على Drive ✔` : '';
+    setStatus(n > 1 ? `✅ اتحفظ في الشيت (ومعاه ${n - 1} كانوا مستنيين النت)${up}` : `✅ اتحفظ في الشيت${up}`);
+    if (links.length) folderLink();
   } catch(e){ console.error(e); setStatus('📴 مفيش نت — اتحفظ على الموبايل وهيترفع للشيت لوحده أول ما النت يرجع', true); }
   finally{ btn.disabled = false; }
 });
