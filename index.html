@@ -298,6 +298,8 @@
   .adot{ display:none; width:10px; height:10px; border-radius:50%; background:#facc15; box-shadow:0 0 8px #facc15; margin-inline-start:8px; vertical-align:middle; animation:attnBlink 1s infinite; }
   .req{ display:none; color:#facc15; font-size:11px; font-weight:800; margin-inline-start:5px; animation:attnBlink 1s infinite; }
   .sub.attn .adot, .sub.attn .req{ display:inline-block; }
+  .rev{ display:none; color:#facc15; font-size:12px; font-weight:800; margin-inline-start:8px; padding:1px 7px; border:1px solid #facc15aa; border-radius:8px; animation:attnBlink 1s infinite; }
+  .sub.review .rev{ display:inline-block; }
   .tile{ position:relative; }
   .tile.attn::after{ content:''; position:absolute; top:7px; left:9px; width:10px; height:10px; border-radius:50%; background:#facc15; box-shadow:0 0 8px #facc15; animation:attnBlink 1s infinite; }
 </style>
@@ -1510,6 +1512,13 @@ function subOf(icon){ return [...document.querySelectorAll('#mFrame .sub')].find
   b.insertAdjacentHTML('beforeend', '<i class="adot"></i><small class="req">إلزامي</small>');
   d.insertAdjacentHTML('beforeend', '<i class="adot"></i><small class="req">إلزامي</small>');
 })();
+const reviewSubs = () => [...document.querySelectorAll('#mRx .sub')].filter(x => /^(👁️|↔️)/.test(x.querySelector('.sbh').textContent.trim()));
+reviewSubs().forEach(x => {
+  x.querySelector('.sbh span').insertAdjacentHTML('beforeend', '<small class="rev">راجع ✓</small>');
+  x.querySelector('.sbh').addEventListener('click', () => x.classList.remove('review'));
+});
+window.__review = on => markReview(on);
+function markReview(on){ reviewSubs().forEach(x => { x.classList.toggle('review', on); if (on) x.classList.remove('open'); }); }
 function setAtt(k, on){
   const cell = k === 'B' ? bRow : $('depthRow'), sub = subOf(ATT_SUB[k]);
   cell.classList.toggle('attn', on); sub.classList.toggle('attn', on);
@@ -1521,7 +1530,8 @@ function setAtt(k, on){
 document.querySelectorAll('#frameBtns .gbtn').forEach(btn => btn.addEventListener('click', () => { setAtt('B', true); setAtt('D', state.frame !== 'rimless'); }));
 // every new customer starts with both reminders on (B always; Depth unless rimless)
 function armReminders(){ setAtt('B', true); setAtt('D', state.frame !== 'rimless'); }
-armReminders();
+// typing any Rx value by hand also counts as "the Rx is in"
+['eyeR', 'eyeL'].forEach(id => ['change', 'wheelclose'].forEach(ev => $(id).addEventListener(ev, () => armReminders())));
 ['armCam', 'armFile'].forEach(id => $(id).addEventListener('change', e => { if (e.target.files && e.target.files.length) setAtt('B', true); }));
 
 /* Curtains: one main section open at a time; sub-sections toggle in place */
@@ -1609,7 +1619,7 @@ document.querySelectorAll('.rst').forEach(b => b.addEventListener('click', () =>
 
 // New session
 $('newBtn').addEventListener('click', () => {
-  setTimeout(() => { try{ armReminders(); }catch(e){} }, 0);
+  setTimeout(() => { try{ setAtt('B', false); setAtt('D', false); markReview(false); }catch(e){} }, 0);
   state = structuredClone(DEFAULTS);
   $('ocrText').value = ''; $('ocrText').style.display = 'none';
   $('ocrFile').value = ''; $('ocrCam').value = '';
@@ -1899,6 +1909,7 @@ async function runOCR(file){
         const rx = await sample.json(RX_PROMPT, { images:[img], modelTier:'default' });
         $('ocrText').value = JSON.stringify(rx); $('ocrText').style.display = 'block';
         const n = applyRx(rx);
+        if (n){ markReview(true); armReminders(); }
         const pdTxt = ` • PD ${state.pd.toFixed(1)} (${state.pdR.toFixed(1)} / ${state.pdL.toFixed(1)})`;
         st.textContent = n ? `تمت القراءة: ${n} عين${pdTxt} — راجع القيم قبل الاعتماد` : 'ملقتش قيم واضحة — دخّلها يدوي';
         return;
@@ -1931,7 +1942,7 @@ async function runOCR(file){
     $('ocrText').value = text; $('ocrText').style.display = 'block';
     const n = applyRx(best.rx);
     if (n){
-      document.querySelectorAll('#mRx .sub').forEach(x => { if (/مقاسات النظر|المسافة الحدقية/.test(x.textContent)) x.classList.add('open'); });
+      markReview(true); armReminders();
       st.textContent = `✅ اتقرت ${n} عين${transposed ? ' • السلندر كان موجب واتحوّر لسالب' : ''} — راجع القيم قبل الاعتماد`;
     } else st.textContent = 'ملقتش قيم واضحة — صوّر الروشتة مستقيمة ومن قريب، أو دخّلها يدوي';
   } catch(err){ console.error(err); st.textContent = 'حصل خطأ أثناء القراءة'; }
@@ -2147,7 +2158,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 28;
+const APP_V = 29;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
