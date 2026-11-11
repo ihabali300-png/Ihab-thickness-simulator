@@ -284,6 +284,22 @@
     .tiles, .mpad{ max-width:370px; margin-left:auto; margin-right:auto; }
     .tiles{ top:-10px; }
   }
+  /* B + A□DBL layout */
+  #boxCells{ grid-template-columns:1fr 2fr; }
+  .adgrp{ display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:4px; padding:4px; border-radius:12px;
+          background:rgba(0,0,0,.22); border:1px solid rgba(0,0,0,.6); box-shadow:inset 0 2px 6px rgba(0,0,0,.65), 0 1px 0 rgba(163,230,53,.12); }
+  .adsq{ color:#bef264; font-size:20px; font-weight:800; opacity:.8; text-shadow:0 1px 0 #000; }
+  .meas{ text-align:center; font-size:9.5px; font-weight:800; color:#facc15c0; letter-spacing:.3px; text-shadow:0 -1px 0 #000, 0 1px 0 rgba(250,204,21,.18); margin-bottom:-2px; }
+  /* yellow attention ring + blinking dot */
+  @keyframes attnRing{ 0%{ box-shadow:0 0 0 2px #facc15, 0 0 4px #facc15aa; } 100%{ box-shadow:0 0 0 2px #facc1555, 0 0 14px #facc15; } }
+  @keyframes attnBlink{ 0%, 100%{ opacity:1; } 50%{ opacity:.15; } }
+  .cell.attn{ animation:attnRing .8s ease-in-out infinite alternate; border-color:#facc15 !important; }
+  .cell.attn select{ border-color:#facc15 !important; }
+  .adot{ display:none; width:10px; height:10px; border-radius:50%; background:#facc15; box-shadow:0 0 8px #facc15; margin-inline-start:8px; vertical-align:middle; animation:attnBlink 1s infinite; }
+  .req{ display:none; color:#facc15; font-size:11px; font-weight:800; margin-inline-start:5px; animation:attnBlink 1s infinite; }
+  .sub.attn .adot, .sub.attn .req{ display:inline-block; }
+  .tile{ position:relative; }
+  .tile.attn::after{ content:''; position:absolute; top:7px; left:9px; width:10px; height:10px; border-radius:50%; background:#facc15; box-shadow:0 0 8px #facc15; animation:attnBlink 1s infinite; }
 </style>
 </head>
 <body>
@@ -1476,9 +1492,34 @@ function renderSwatches(){
 makeCtrl($('fitCells'), 'البانتو|Panto', range(0, 20, 2), v => v.toFixed(0) + '°', () => state.panto, v => state.panto = v);
 makeCtrl($('fitCells'), 'الالتفاف|Wrap', range(0, 20, 1), v => v.toFixed(0) + '°', () => state.wrap, v => state.wrap = v);
 makeCtrl($('fitCells'), 'عمق الإطار|Depth', range(2, 6, 0.5), mm, () => state.depth, v => state.depth = v, 'depthRow');
-makeCtrl($('boxCells'), 'عرض العدسة|A', range(44, 62, 0.5), mm, () => state.A, v => state.A = v);
-makeCtrl($('boxCells'), 'ارتفاع العدسة|B', range(26, 50, 0.5), mm, () => state.B, v => state.B = v);
-makeCtrl($('boxCells'), 'الجسر|DBL', range(12, 24, 0.5), mm, () => state.DBL, v => state.DBL = v);
+
+const bRow = makeCtrl($('boxCells'), 'ارتفاع العدسة|B', range(26, 50, 0.5), mm, () => state.B, v => state.B = v, 'bRow');
+const adGrp = document.createElement('div'); adGrp.className = 'adgrp'; $('boxCells').appendChild(adGrp);
+const aRow = makeCtrl(adGrp, 'عرض العدسة|A', range(44, 62, 0.5), mm, () => state.A, v => state.A = v);
+const sq = document.createElement('div'); sq.className = 'adsq'; sq.textContent = '□'; adGrp.appendChild(sq);
+const dRow = makeCtrl(adGrp, 'الجسر|DBL', range(12, 24, 0.5), mm, () => state.DBL, v => state.DBL = v);
+[bRow, $('depthRow')].forEach(r => { const m = document.createElement('div'); m.className = 'meas'; m.textContent = 'قِس بنفسك'; r.prepend(m); });
+
+/* Yellow "measure it yourself" reminders:
+   B  — lights up after an arm photo or any edit of A / DBL; off once B is entered (even the same value).
+   Depth — lights up when a rimmed frame type is chosen (metal / half-rim / plastic); off once Depth is entered. */
+const ATT_SUB = { B:'📐', D:'🕶️' };
+function subOf(icon){ return [...document.querySelectorAll('#mFrame .sub')].find(x => x.querySelector('.sbh').textContent.trim().startsWith(icon)); }
+(() => {
+  const b = subOf('📐').querySelector('.sbh span'), d = subOf('🕶️').querySelector('.sbh span');
+  b.insertAdjacentHTML('beforeend', '<i class="adot"></i>');
+  d.insertAdjacentHTML('beforeend', '<i class="adot"></i><small class="req">إلزامي</small>');
+})();
+function setAtt(k, on){
+  const cell = k === 'B' ? bRow : $('depthRow'), sub = subOf(ATT_SUB[k]);
+  cell.classList.toggle('attn', on); sub.classList.toggle('attn', on);
+  const tile = document.querySelector('.tile[data-m="mFrame"]');
+  tile.classList.toggle('attn', bRow.classList.contains('attn') || $('depthRow').classList.contains('attn'));
+}
+[aRow, dRow].forEach(r => ['change', 'wheelclose'].forEach(ev => r.addEventListener(ev, () => setAtt('B', true))));
+['change', 'wheelclose'].forEach(ev => { bRow.addEventListener(ev, () => setAtt('B', false)); $('depthRow').addEventListener(ev, () => setAtt('D', false)); });
+document.querySelectorAll('#frameBtns .gbtn').forEach(btn => btn.addEventListener('click', () => setAtt('D', state.frame !== 'rimless')));
+['armCam', 'armFile'].forEach(id => $(id).addEventListener('change', e => { if (e.target.files && e.target.files.length) setAtt('B', true); }));
 
 /* Curtains: one main section open at a time; sub-sections toggle in place */
 document.querySelectorAll('.tile').forEach(t => t.addEventListener('click', () => {
@@ -1565,6 +1606,7 @@ document.querySelectorAll('.rst').forEach(b => b.addEventListener('click', () =>
 
 // New session
 $('newBtn').addEventListener('click', () => {
+  try{ setAtt('B', false); setAtt('D', false); }catch(e){}
   state = structuredClone(DEFAULTS);
   $('ocrText').value = ''; $('ocrText').style.display = 'none';
   $('ocrFile').value = ''; $('ocrCam').value = '';
@@ -2098,7 +2140,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 25;
+const APP_V = 26;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
@@ -2200,7 +2242,7 @@ const APP_V = 25;
     W.classList.add('on');
     requestAnimationFrame(() => { L.scrollTop = Math.max(0, cur) * H; paint(); });
   }
-  function close(){ commit(); W.classList.remove('on'); sel = null; }
+  function close(){ commit(); const s0 = sel; W.classList.remove('on'); sel = null; if (s0) s0.dispatchEvent(new Event('wheelclose', { bubbles:true })); }
   W.querySelector('.bk').addEventListener('click', close);
   document.getElementById('whlOk').addEventListener('click', close);
   document.addEventListener('click', e => {
