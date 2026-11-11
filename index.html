@@ -46,7 +46,8 @@
   #updBtn{ position:relative; background:none; color:var(--lime); border:1px solid var(--lime); border-radius:9px; width:36px; height:34px; font-size:18px; font-weight:800; cursor:pointer; line-height:1; }
   #updBtn.spin{ animation:updspin .8s linear infinite; }
   @keyframes updspin{ to{ transform:rotate(360deg); } }
-  #updDot{ display:none; position:absolute; top:-4px; left:-4px; width:11px; height:11px; border-radius:50%; background:#f87171; box-shadow:0 0 6px #f87171; }
+  #updDot{ display:none; position:absolute; top:-7px; left:-7px; min-width:17px; height:17px; padding:0 3px; border-radius:4px; background:#dc2626; color:#fff;
+            font:800 11.5px/17px Consolas, monospace; font-style:normal; text-align:center; box-shadow:0 0 0 2px #050f08, 0 0 8px #dc2626aa; }
   #updBtn.has #updDot{ display:block; }
   #updToast{ position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:600; background:#173a22; color:#ecfccb; border:1px solid var(--lime);
              border-radius:12px; padding:9px 14px; font-size:14px; font-weight:700; box-shadow:0 6px 20px #000a; direction:rtl; display:none; white-space:nowrap; }
@@ -279,7 +280,7 @@
 <header>
   <h1>IHAB LensForm 3D</h1>
   <span class="hstat" id="hstat">العدسة مركّبة Flush مع الإطار ✓</span>
-  <span class="hb"><button id="updBtn" title="تحديث لآخر إصدار">⟳<i id="updDot"></i></button><a id="cardBtn" href="card.html" title="كارت قياسات الفريم">🗂️ كارت</a><button id="newBtn" title="جلسة جديدة">📄 جديد</button></span>
+  <span class="hb"><button id="updBtn" title="تحديث لآخر إصدار">⟳<i id="updDot">1</i></button><a id="cardBtn" href="card.html" title="كارت قياسات الفريم">🗂️ كارت</a><button id="newBtn" title="جلسة جديدة">📄 جديد</button></span>
 </header>
 
 <div id="app">
@@ -2086,7 +2087,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updToast"></div>
 <script>
 /* ⟳ Update: checks version.json; tap to wipe the offline copy and load the newest version */
-const APP_V = 20;
+const APP_V = 21;
 (() => {
   const btn = document.getElementById('updBtn'), toast = document.getElementById('updToast');
   const say = (t, ms = 3500) => { toast.textContent = t; toast.style.display = 'block'; clearTimeout(say.t); say.t = setTimeout(() => toast.style.display = 'none', ms); };
