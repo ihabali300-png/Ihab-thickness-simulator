@@ -1630,7 +1630,7 @@ function parseRx(raw){
   const eyeOf = l => /^(\W*)(OD|0D|QD|R|RE|RT|RIGHT)\b/.test(l) ? 'R' : (/^(\W*)(OS|0S|QS|L|LE|LT|LEFT)\b/.test(l) ? 'L' : null);
   const toks = l => [...l.replace(/^(\W*)(OD|0D|QD|OS|0S|QS|RIGHT|LEFT|RE|LE|RT|LT|R|L)\b/, '').matchAll(/([+-]?)\s?(\d{1,3}(?:\.\d{1,2})?)/g)]
     .map(m => ({ s:m[1], v:parseFloat(m[2]), dec:m[2].includes('.') }));
-  const signed = (t, forceMinus) => t.v === 0 ? 0 : ((t.s === '-' || forceMinus) ? -t.v : t.v);
+  const signed = (t, cylMode) => t.v === 0 ? 0 : (t.s === '-' ? -t.v : t.s === '+' ? t.v : (cylMode ? -t.v : t.v));   // CYL: unsigned = minus, explicit + = plus (transposed later)
   for (const line of lines){
     const e = eyeOf(line); if (!e || out[e]) continue;
     const t = toks(line); if (t.length < 1) continue;
@@ -1683,13 +1683,16 @@ function applyPD(rx){
   if (okM(t)){ state.pdR = state.pdL = snap(t, 0.5, 20, 45); state.pd = state.pdR + state.pdL; return true; }   // a single mono value written as "PD 31"
   return false;
 }
+let transposed = false;
 function applyRx(rx){
-  let n = 0;
+  let n = 0; transposed = false;
   for (const eye of ['R', 'L']){
     const e = rx && rx[eye];
     if (!e || typeof e.sph !== 'number') continue;
     let sph = e.sph, cyl = +e.cyl || 0, ax = Math.round(+e.axis || 0);
-    if (cyl > 0){ sph += cyl; cyl = -cyl; ax = ((ax + 89) % 180) + 1; }   // to minus-cylinder
+    if (cyl > 0){   // transposition to minus-cylinder: SPH + CYL (algebraic), CYL sign flipped, axis ±90 (≤90 → +90, >90 → −90)
+      sph = Math.round((sph + cyl) * 100) / 100; cyl = -cyl; ax = ax <= 90 ? ax + 90 : ax - 90; transposed = true;
+    }
     state[eye].sph = snap(sph, 0.25, -12, 10);
     state[eye].cyl = snap(cyl, 0.25, -6, 0);
     state[eye].axis = snap(ax, 1, 0, 180); n++;
@@ -1749,7 +1752,7 @@ async function runOCR(file){
     const n = applyRx(parseRx(text));
     if (n){
       document.querySelectorAll('#mRx .sub').forEach(x => { if (/مقاسات النظر|المسافة الحدقية/.test(x.textContent)) x.classList.add('open'); });
-      st.textContent = `✅ اتقرت ${n} عين — راجع القيم قبل الاعتماد`;
+      st.textContent = `✅ اتقرت ${n} عين${transposed ? ' • السلندر كان موجب واتحوّر لسالب' : ''} — راجع القيم قبل الاعتماد`;
     } else st.textContent = 'ملقتش قيم واضحة — صوّر الروشتة مستقيمة ومن قريب، أو دخّلها يدوي';
   } catch(err){ console.error(err); st.textContent = 'حصل خطأ أثناء القراءة'; }
 }
