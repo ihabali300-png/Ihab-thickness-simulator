@@ -119,6 +119,10 @@
   #dateBar label{ display:flex; flex-direction:column; gap:3px; font-size:12px; color:#bef264; }
   #dateBar input[type=date]{ background:var(--box); color:var(--lime2); border:1px solid #a3e63550; border-radius:7px; height:38px; padding:0 6px; font-size:13.5px; color-scheme:dark; width:100%; }
   #dateBar #dClear{ border-radius:8px; height:38px; padding:0 8px; font-size:11.5px; color:#fca5a5; border-color:#f8717166; }
+  .edt{ flex:none; width:52px; background:#0b1f2a; color:#bae6fd; border:1px solid #38bdf888; border-radius:8px; font-size:16px; cursor:pointer; }
+  #editBar{ display:none; justify-content:space-between; align-items:center; gap:8px; background:#0b1f2a; border:1px solid #38bdf888; border-radius:10px;
+            padding:8px 10px; margin:0 0 8px; color:#bae6fd; font-size:13px; direction:rtl; }
+  #editBar button{ background:none; border:1px solid #f8717188; color:#fca5a5; border-radius:8px; padding:5px 8px; font-size:12px; cursor:pointer; font-family:inherit; }
 </style>
 </head>
 <body>
@@ -147,6 +151,7 @@
   <div class="sub"><button class="sbh"><span>📝 ملاحظات</span></button><div class="sbb"><div class="in"><div class="pad">
     <textarea id="notes" placeholder="أي ملاحظة عن التظبيط..."></textarea>
   </div></div></div></div>
+  <div id="editBar"><span id="editTxt"></span><button id="editCancel">✕ إلغاء التعديل</button></div>
   <button class="save" id="saveBtn">💾 حفظ في الشيت</button>
   <div id="status"></div>
 
@@ -215,11 +220,20 @@ FIELDS.forEach(([k]) => $(k).addEventListener('change', checkRanges));
 const ORDER_PREFIX = 'TBK-2500';
 const orderFull = () => { const t = $('order').value.trim(); return t ? ORDER_PREFIX + t : ''; };
 function zeroMeasures(){ FIELDS.forEach(([k]) => { $(k).value = '0'; }); checkRanges(); }
+let editKey = null;   // [date, code, order] of the record being edited
+function setEdit(key){
+  editKey = key;
+  $('saveBtn').textContent = key ? '💾 حفظ التعديل' : '💾 حفظ في الشيت';
+  $('editBar').style.display = key ? 'flex' : 'none';
+  if (key) $('editTxt').textContent = `✏️ بتعدّل سجل ${key[0]} · ${key[2] || key[1]}`;
+}
 function resetForm(){
+  setEdit(null);
   $('code').value = ''; $('order').value = ''; $('notes').value = '';
   zeroMeasures(); setStatus('');
 }
 $('newBtn').addEventListener('click', resetForm);
+$('editCancel').addEventListener('click', () => { resetForm(); setStatus('اتلغى التعديل'); });
 // ريست: zero every measurement (keeps code / order so you can fix a mistake quickly)
 $('resetBtn').addEventListener('click', () => { resetForm(); setStatus('↺ كل الخانات اتمسحت'); });
 
@@ -251,6 +265,16 @@ $('saveBtn').addEventListener('click', async () => {
   if (!code && !order){ setStatus('اكتب كود الفريم أو رقم الأوردر الأول', true); return; }
   const btn = $('saveBtn'); btn.disabled = true; setStatus('⏳ جاري الحفظ…');
   const v = k => parseFloat($(k).value);
+  if (editKey){
+    const row = [editKey[0], code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim()];
+    try{
+      const j = await api('update', { key:editKey, row });
+      if (!j.updated) throw new Error('not found');
+      resetForm(); allRows = null; setStatus('✅ التعديل اتحفظ في الشيت');
+    } catch(e){ console.error(e); setStatus(e.message === 'unknown action' ? '⚠️ كود الشيت لسه قديم — حدّثه وانشره إصدار جديد' : '⚠️ التعديل متحفظش — اتأكد من النت', true); }
+    finally{ btn.disabled = false; }
+    return;
+  }
   const row = [stamp(), code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim()];
   setQ([...getQ(), row]);
   resetForm(); allRows = null;
@@ -290,10 +314,12 @@ function renderHits(){
     const b = document.createElement('button');
     b.className = 'hit';
     b.innerHTML = `📅 <span class="en">${r[0] || ''}</span><br>🏷️ <span class="en">${r[1] || '—'}</span> · 🧾 <span class="en">${r[2] || '—'}</span>`;
-    b.addEventListener('click', () => { closeSheet(); loadRow(r); });
+    b.addEventListener('click', () => { closeSheet(); loadRow(r); setEdit(null); });
+    const ed = document.createElement('button'); ed.className = 'edt'; ed.textContent = '✏️'; ed.title = 'تعديل';
+    ed.addEventListener('click', () => { closeSheet(); loadRow(r); setEdit([r[0], r[1], r[2]]); setStatus('✏️ عدّل اللي محتاجه ودوس حفظ التعديل'); });
     const d = document.createElement('button'); d.className = 'del'; d.textContent = '🗑️';
     d.addEventListener('click', () => askDelete(r, w, d));
-    w.append(b, d); box.appendChild(w);
+    w.append(b, ed, d); box.appendChild(w);
   });
 }
 async function openSheet(){
@@ -312,7 +338,12 @@ async function askDelete(r, w, d){
     if (qi >= 0){ q.splice(qi, 1); setQ(q); }
     else{ const j = await api('delete', { key:[r[0], r[1], r[2]] }); if (!j.deleted) throw new Error('not found'); }
     allRows = allRows.filter(x => x !== r); renderHits();
-  } catch(e){ console.error(e); d.disabled = false; d.classList.remove('sure'); d.textContent = '⚠️'; d.title = 'مقدرتش أمسح — اتأكد من النت أو إن الكود اتحدّث'; }
+  } catch(e){
+    console.error(e); d.disabled = false; d.classList.remove('sure'); d.textContent = '⚠️';
+    const msg = e.message === 'unknown action' ? '⚠️ كود الشيت لسه قديم — حدّثه وانشره إصدار جديد عشان المسح يشتغل'
+              : e.message === 'not found' ? '⚠️ ملقتش السجل ده في الشيت — يمكن اتمسح أو اتعدّل من الشيت' : '⚠️ مقدرتش أمسح — اتأكد من النت';
+    const h = $('results').querySelector('.hint'); if (h) h.textContent = msg;
+  }
 }
 function closeSheet(){ $('sheet').classList.remove('on'); }
 $('logBtn').addEventListener('click', openSheet);
