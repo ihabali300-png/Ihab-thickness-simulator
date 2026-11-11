@@ -51,6 +51,16 @@
   #updBtn.has #updDot{ display:block; }
   #updToast{ position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:600; background:#173a22; color:#ecfccb; border:1px solid var(--lime);
              border-radius:12px; padding:9px 14px; font-size:14px; font-weight:700; box-shadow:0 6px 20px #000a; direction:rtl; display:none; white-space:nowrap; }
+  #updCard{ position:fixed; top:58px; left:10px; right:10px; max-width:380px; margin:0 auto; z-index:650; background:#0b1a0f; color:#ecfccb;
+             border:1px solid var(--lime); border-radius:14px; padding:12px 14px; box-shadow:0 8px 28px #000c; direction:rtl; display:none; }
+  #updCard.on{ display:block; }
+  #updCard .uh{ color:var(--lime); font-weight:800; font-size:15px; margin-bottom:6px; }
+  #updCard .uh b{ direction:ltr; unicode-bidi:isolate; color:#bef264; font-family:Consolas, monospace; }
+  #updCard ul{ margin:0 0 10px; padding:0 18px 0 0; font-size:13.5px; line-height:1.7; }
+  #updCard .ub{ display:flex; gap:8px; }
+  #updCard .ub button{ flex:1; border-radius:9px; padding:8px; font-weight:800; font-size:14px; cursor:pointer; font-family:inherit; }
+  #updNow{ background:var(--lime); color:#0b1a0f; border:none; }
+  #updLater{ background:none; color:#d9f99d; border:1px solid #a3e63566; }
   #cardBtn{ color:var(--lime); border:1px solid var(--lime); border-radius:9px; padding:6px 10px; font-weight:700; font-size:14px; text-decoration:none; white-space:nowrap; }
   #app{ flex:1; display:flex; min-height:0; }
   #panel{ width:380px; flex:none; overflow-y:auto; padding:12px; background:var(--panel); border-left:2px solid #a3e63544; }
@@ -2085,28 +2095,40 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 </script>
 <script>if(/IHABApk(?!Full)/.test(navigator.userAgent)||/[?&]apk=1/.test(location.search)){const c=document.getElementById('cardBtn');if(c)c.style.display='none';}</script>
 <div id="updToast"></div>
+<div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
-/* ⟳ Update: checks version.json; tap to wipe the offline copy and load the newest version */
-const APP_V = 22;
+/* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
+const APP_V = 23;
 (() => {
-  const btn = document.getElementById('updBtn'), toast = document.getElementById('updToast');
+  const $u = id => document.getElementById(id);
+  const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
   const say = (t, ms = 3500) => { toast.textContent = t; toast.style.display = 'block'; clearTimeout(say.t); say.t = setTimeout(() => toast.style.display = 'none', ms); };
-  let latest = APP_V;
-  const check = () => fetch('version.json?_=' + Date.now(), { cache:'no-store' }).then(r => r.json()).then(j => {
-    latest = +j.v || APP_V;
-    if (latest > APP_V){ btn.classList.add('has'); say('🆕 فيه تحديث جديد — دوس ⟳ فوق', 5000); }
-  }).catch(() => {});
-  setTimeout(check, 2500);
-  btn.addEventListener('click', async () => {
-    btn.classList.add('spin'); say('⏳ بحدّث لآخر إصدار…', 8000);
+  let info = null;
+  const showNotes = (j, done) => {
+    $u('updVer').textContent = 'v' + j.v;
+    $u('updList').innerHTML = (j.notes || []).map(n => `<li>${n}</li>`).join('') || '<li>تحسينات عامة</li>';
+    card.querySelector('.uh').firstChild.textContent = done ? '✅ اتحدّث — الجديد في ' : '🆕 الجديد في التحديث ';
+    $u('updNow').style.display = done ? 'none' : ''; $u('updLater').textContent = done ? 'تمام' : 'بعدين';
+    card.classList.add('on');
+  };
+  const doUpdate = async () => {
+    card.classList.remove('on'); btn.classList.add('spin'); say('⏳ بحدّث لآخر إصدار…', 8000);
     try{
       if ('serviceWorker' in navigator){ const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r => r.update().catch(() => {}))); }
       if (window.caches){ const ks = await caches.keys(); await Promise.all(ks.filter(k => k.startsWith('ihab-thk')).map(k => caches.delete(k))); }
     }catch(e){}
     const q = new URLSearchParams(location.search); q.set('_', Date.now());
     location.replace(location.pathname + '?' + q.toString());
-  });
-  if (/[?&]_=\d/.test(location.search)) setTimeout(() => say(`✅ معاك آخر إصدار (v${APP_V})`), 600);
+  };
+  fetch('version.json?_=' + Date.now(), { cache:'no-store' }).then(r => r.json()).then(j => {
+    info = j;
+    const fresh = /[?&]_=\d/.test(location.search);
+    if ((+j.v || 0) > APP_V){ btn.classList.add('has'); setTimeout(() => showNotes(j, false), 1500); }
+    else if (fresh) setTimeout(() => showNotes(j, true), 600);
+  }).catch(() => { if (/[?&]_=\d/.test(location.search)) say(`✅ معاك آخر إصدار (v${APP_V})`); });
+  btn.addEventListener('click', () => { if (info && +info.v > APP_V && !card.classList.contains('on')) showNotes(info, false); else doUpdate(); });
+  $u('updNow').addEventListener('click', doUpdate);
+  $u('updLater').addEventListener('click', () => card.classList.remove('on'));
 })();
 </script>
 <script>if('serviceWorker' in navigator) addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
