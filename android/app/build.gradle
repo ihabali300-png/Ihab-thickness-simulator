@@ -31,7 +31,7 @@ android {
             applicationIdSuffix '.full'
             buildConfigField 'String', 'UA_TAG', '"IHABApkFull"'
             buildConfigField 'String', 'START', '"?apk=full"'
-            resValue 'string', 'app_name', 'IHAB LensForm 3D'
+            resValue 'string', 'app_name', 'IHAB LensForm 3D Pro'
         }
     }
     buildTypes {

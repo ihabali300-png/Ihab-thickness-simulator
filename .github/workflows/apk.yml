@@ -19,13 +19,13 @@ jobs:
       - name: Rename
         run: |
           cp android/app/build/outputs/apk/lite/release/app-lite-release.apk IHAB-LensForm-3D.apk
-          cp android/app/build/outputs/apk/full/release/app-full-release.apk IHAB-LensForm-3D-Full.apk
+          cp android/app/build/outputs/apk/full/release/app-full-release.apk IHAB-LensForm-3D-Pro.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: IHAB LensForm 3D v1.0.${{ github.run_number }}
-          body: "IHAB LensForm 3D — IHAB-LensForm-3D.apk: المحاكي بس (للأصحاب) · IHAB-LensForm-3D-Full.apk: المحاكي + الكارت (لإيهاب بس)"
+          body: "IHAB LensForm 3D — IHAB-LensForm-3D.apk: المحاكي بس (للأصحاب) · IHAB-LensForm-3D-Pro.apk: النسخة Pro — المحاكي + الكارت (لإيهاب بس)"
           files: |
             IHAB-LensForm-3D.apk
-            IHAB-LensForm-3D-Full.apk
+            IHAB-LensForm-3D-Pro.apk
           make_latest: true
