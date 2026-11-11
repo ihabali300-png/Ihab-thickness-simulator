@@ -1476,7 +1476,7 @@ async function traceFrame(file){
       customPts = tr.pts; state.shape = 'custom';
       if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
       syncUI(); requestRebuild(); renderShapes();
-      $('shNote').textContent = `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners ? ` — شكل بزوايا (${tr.corners} أضلاع)` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
+      $('shNote').textContent = `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
     } else {
       // edge not clear enough (rimless / clear acetate / angled photo) → closest preset with the photo's proportions
       if (preset) state.shape = preset;
