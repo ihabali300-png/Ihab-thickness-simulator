@@ -1242,152 +1242,171 @@ async function loadImageData(file, maxSide = 1100){
   const ctx = cv.getContext('2d', { willReadFrequently:true }); ctx.drawImage(bmp, 0, 0, cv.width, cv.height);
   return { cv, ctx, data:ctx.getImageData(0, 0, cv.width, cv.height) };
 }
-function traceLens(img, box){
-  const { data, cv } = img, W = cv.width, H = cv.height, px = data.data;
-  const cx = (box.x0 + box.x1) / 2 * W, cy = (box.y0 + box.y1) / 2 * H;
-  const hw = Math.abs(box.x1 - box.x0) / 2 * W, hh = Math.abs(box.y1 - box.y0) / 2 * H;
-  const at = (x, y) => {   // 3×3 averaged colour
-    let r = 0, g = 0, b = 0, n = 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++){
-      const X = Math.min(W - 1, Math.max(0, Math.round(x + dx))), Y = Math.min(H - 1, Math.max(0, Math.round(y + dy)));
-      const i = (Y * W + X) * 4; r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+function traceLens(img, box, opts = {}){
+  const rimless = !!opts.rimless;
+  /* v2 tracer — "one closed edge path" instead of "first colour change per ray".
+     1) crop around the user's box, colour-gradient (Sobel on R,G,B, strongest channel) on a lightly blurred copy
+     2) unwrap to polar around the box centre; score = radial part of the gradient (rims run across the rays,
+        temples/text mostly don't); an edge that closely follows a stronger inner edge is damped → inner rim edge wins
+     3) dynamic programming over all angles finds the single closed path with the most edge and least jumping
+        (faint rimless edges add up along the path; one-off distractors can't pull it away)
+     4) shape model: corners are found from the turning angle, straight sides become straight, curved sides are
+        smoothed, corners get a small real-lens fillet; near-convex outlines are wrapped to remove dents
+     Output is the same as before: points relative to the box centre (y up), star-shaped, 180 samples. */
+  const { cv } = img, W = cv.width, H = cv.height;
+  const bcx = (box.x0 + box.x1) / 2 * W, bcy = (box.y0 + box.y1) / 2 * H;
+  const bhw = Math.abs(box.x1 - box.x0) / 2 * W, bhh = Math.abs(box.y1 - box.y0) / 2 * H;
+  // ---- 1) working crop: lens box ≈ 340 px on its long side
+  const pad = 1.5, k = 340 / (2 * Math.max(bhw, bhh));
+  const sx = bcx - bhw * pad, sy = bcy - bhh * pad, cw = Math.round(bhw * 2 * pad * k), ch = Math.round(bhh * 2 * pad * k);
+  const wc = document.createElement('canvas'); wc.width = cw; wc.height = ch;
+  const wx = wc.getContext('2d', { willReadFrequently:true });
+  wx.fillStyle = '#808080'; wx.fillRect(0, 0, cw, ch);
+  wx.filter = 'blur(1.1px)'; wx.drawImage(cv, sx, sy, bhw * 2 * pad, bhh * 2 * pad, 0, 0, cw, ch); wx.filter = 'none';
+  const d = wx.getImageData(0, 0, cw, ch).data, n = cw * ch;
+  const GX = new Float32Array(n), GY = new Float32Array(n);
+  for (let y = 1; y < ch - 1; y++) for (let x = 1; x < cw - 1; x++){
+    let bx = 0, by = 0, bm = -1;
+    for (let c = 0; c < 3; c++){
+      const P = (xx, yy) => d[((yy) * cw + xx) * 4 + c];
+      const gx = (P(x + 1, y - 1) + 2 * P(x + 1, y) + P(x + 1, y + 1)) - (P(x - 1, y - 1) + 2 * P(x - 1, y) + P(x - 1, y + 1));
+      const gy = (P(x - 1, y + 1) + 2 * P(x, y + 1) + P(x + 1, y + 1)) - (P(x - 1, y - 1) + 2 * P(x, y - 1) + P(x + 1, y - 1));
+      const m = gx * gx + gy * gy; if (m > bm){ bm = m; bx = gx; by = gy; }
     }
-    return [r / n, g / n, b / n];
-  };
-  // interior reference colour (what is seen through the lens opening)
-  let ref = [0, 0, 0], m = 0;
-  for (let k = 0; k < 40; k++){ const t = k / 40 * Math.PI * 2; const c = at(cx + Math.cos(t) * hw * 0.3, cy + Math.sin(t) * hh * 0.3); ref = ref.map((v, j) => v + c[j]); m++; }
-  ref = ref.map(v => v / m);
-  const dist = c => Math.hypot(c[0] - ref[0], c[1] - ref[1], c[2] - ref[2]);
-  // Each ray collects edge candidates from two detectors: (a) start of a run that differs from the interior colour,
-  // (b) local peaks of the colour gradient. Temples, printed logos, reflections and paper edges add false candidates.
-  const N = 144, cands = [], expect = [];   // one ray every 2.5° so corners are sampled
-  for (let k = 0; k < N; k++){
-    const t = k / N * Math.PI * 2, c = Math.cos(t), s = Math.sin(t);
-    const e = 1 / Math.sqrt((c / hw) ** 2 + (s / hh) ** 2);           // expected radius from the box
-    const t0 = 0.45 * e, t1 = 1.4 * e, prof = [], cols = [];
-    for (let r = t0; r <= t1; r += 1){ const col = at(cx + c * r, cy - s * r); cols.push(col); prof.push(dist(col)); }
-    const peak = Math.max(...prof), thr = Math.max(28, 0.45 * peak), list = [];
-    for (let i = 0; i < prof.length - 2; i++){
-      if (prof[i] > thr && prof[i + 1] > thr && prof[i + 2] > thr && (i === 0 || prof[i - 1] <= thr)) list.push(t0 + i);
-    }
-    const g = cols.map((col, i) => i + 2 < cols.length ? Math.hypot(cols[i + 2][0] - col[0], cols[i + 2][1] - col[1], cols[i + 2][2] - col[2]) : 0);
-    const gmax = Math.max(...g), gthr = Math.max(18, 0.35 * gmax);
-    for (let i = 1; i < g.length - 1; i++) if (g[i] > gthr && g[i] >= g[i - 1] && g[i] >= g[i + 1]) list.push(t0 + i + 1);
-    cands.push(list); expect.push(e);
+    GX[y * cw + x] = bx; GY[y * cw + x] = by;
   }
-  /* Robust smooth fit: the outline is modelled as a Fourier series r(θ) = a0 + Σ (am cos mθ + bm sin mθ).
-     Coarse-to-fine (few harmonics first, more later); on every pass each ray takes the candidate nearest the current
-     curve, far candidates are ignored and near ones are Cauchy-weighted. Isolated wrong edges (temple lines, text,
-     glare) can't bend a smooth curve, so they drop out as outliers. */
-  const TH = Array.from({ length:N }, (_, k) => k / N * Math.PI * 2);
-  const fitF = (rs, ws, M) => {
-    const P = 2 * M + 1, A = Array.from({ length:P }, () => new Float64Array(P + 1));
-    const basis = th => { const v = [1]; for (let m = 1; m <= M; m++){ v.push(Math.cos(m * th), Math.sin(m * th)); } return v; };
-    for (let k = 0; k < N; k++){ if (!ws[k]) continue; const v = basis(TH[k]);
-      for (let i = 0; i < P; i++){ for (let j = 0; j < P; j++) A[i][j] += ws[k] * v[i] * v[j]; A[i][P] += ws[k] * v[i] * rs[k]; } }
-    for (let i = 1; i < P; i++){ const m = Math.ceil(i / 2); A[i][i] += 0.00002 * m ** 4 * N; }   // smoothness penalty on high harmonics
-    A[0][0] += 1e-9;
-    for (let i = 0; i < P; i++){   // Gauss-Jordan
-      let piv = i; for (let r = i + 1; r < P; r++) if (Math.abs(A[r][i]) > Math.abs(A[piv][i])) piv = r;
-      [A[i], A[piv]] = [A[piv], A[i]];
-      const d = A[i][i] || 1e-12; for (let j = i; j <= P; j++) A[i][j] /= d;
-      for (let r = 0; r < P; r++) if (r !== i){ const f = A[r][i]; if (f) for (let j = i; j <= P; j++) A[r][j] -= f * A[i][j]; }
+  const cx = bhw * pad * k, cy = bhh * pad * k, hw = bhw * k, hh = bhh * k;
+  // ---- 2) polar unwrap with a super-ellipse prior (closer to lens shapes than an ellipse)
+  const NA = 360, NR = 150, F0 = 0.55, F1 = 1.32, sup = 2.6;
+  const prior = t => { const c = Math.abs(Math.cos(t)) / hw, s = Math.abs(Math.sin(t)) / hh; return 1 / Math.pow(c ** sup + s ** sup, 1 / sup); };
+  const E = new Float32Array(NA), S = new Float32Array(NA * NR), TG = new Float32Array(NA * NR), all = [];
+  const bil = (A, x, y) => { const x0 = Math.floor(x), y0 = Math.floor(y); if (x0 < 1 || y0 < 1 || x0 >= cw - 2 || y0 >= ch - 2) return 0;
+    const fx = x - x0, fy = y - y0, i = y0 * cw + x0; return (A[i] * (1 - fx) + A[i + 1] * fx) * (1 - fy) + (A[i + cw] * (1 - fx) + A[i + cw + 1] * fx) * fy; };
+  for (let a = 0; a < NA; a++){
+    const t = a / NA * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t); E[a] = prior(t);
+    for (let j = 0; j < NR; j++){
+      const f = F0 + (F1 - F0) * j / (NR - 1), r = f * E[a], x = cx + ux * r, y = cy + uy * r;
+      const gx = bil(GX, x, y), gy = bil(GY, x, y), g = Math.abs(gx * ux + gy * uy);
+      S[a * NR + j] = g; TG[a * NR + j] = Math.abs(-gx * uy + gy * ux); if (j % 3 === 0) all.push(g);
     }
-    const coef = A.map(row => row[P]);
-    return TH.map(th => basis(th).reduce((acc, v, i) => acc + v * coef[i], 0));
-  };
-  const scale = expect.reduce((a, b) => a + b, 0) / N;
-  let curve = expect.map(e => e / scale), inl = 0;
-  const plan = [[2, 0.35], [3, 0.3], [4, 0.25], [5, 0.2], [6, 0.15], [7, 0.12], [8, 0.1], [8, 0.08]];
-  for (const [M, tol] of plan){
-    const rs = new Array(N).fill(0), ws = new Array(N).fill(0); inl = 0;
-    for (let k = 0; k < N; k++){
-      let best = null, bd = Infinity;
-      for (const r of cands[k]){ const d = Math.abs(r / scale - curve[k]) / curve[k]; if (d < bd){ bd = d; best = r / scale; } }
-      if (best !== null && bd < tol){ rs[k] = best; ws[k] = 1 / (1 + (bd / 0.04) ** 2); inl++; }
-    }
-    if (inl < 14) break;
-    curve = fitF(rs, ws, M);
   }
-  const quality = inl / N;
-  /* Lens outlines are convex. Take every ray's real edge point that lies near the smooth guide curve (outliers such
-     as temple lines inside the lens, logos and glare are already rejected), then wrap them in a CONVEX HULL:
-     straight sides stay straight and corners stay sharp, with no pixel jitter. If the hull simplifies to 4–10
-     sides, it is rebuilt as a clean polygon with slightly rounded corners (real cut lenses are never razor sharp). */
-  const raw = [];
-  for (let k = 0; k < N; k++){
-    let best = null, bd = Infinity;
-    for (const r of cands[k]){ const d = Math.abs(r / scale - curve[k]) / curve[k]; if (d < bd){ bd = d; best = r; } }
-    const r = best !== null && bd < 0.06 ? best : curve[k] * scale;
-    raw.push([r * Math.cos(TH[k]), r * Math.sin(TH[k])]);
-  }
-  const hull = (() => {
-    const P = raw.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-    const lo = [], up = [];
-    for (const p of P){ while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
-    for (let i = P.length - 1; i >= 0; i--){ const p = P[i]; while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
-    up.pop(); lo.pop(); return lo.concat(up);   // CCW
-  })();
-  const segDist = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1e-9;
-    let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2; t = Math.max(0, Math.min(1, t));
-    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy); };
-  // densify the hull, then Douglas–Peucker to find its real corners
-  const dense = [];
-  for (let i = 0; i < hull.length; i++){ const a = hull[i], b = hull[(i + 1) % hull.length], n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (scale * 0.01)));
-    for (let k = 0; k < n; k++) dense.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); }
-  let i0 = 0, far = -1; dense.forEach(([x, y], i) => { const d = x * x + y * y; if (d > far){ far = d; i0 = i; } });
-  const D = dense.slice(i0).concat(dense.slice(0, i0)); D.push(D[0]);
-  const rdp = (a, b, eps, keep) => { let md = 0, mi = -1; for (let i = a + 1; i < b; i++){ const d = segDist(D[i], D[a], D[b]); if (d > md){ md = d; mi = i; } }
-    if (md > eps){ rdp(a, mi, eps, keep); keep.push(mi); rdp(mi, b, eps, keep); } };
-  const keep = [0]; rdp(0, D.length - 1, 0.018 * scale, keep); keep.sort((a, b) => a - b);
-  const V = keep.map(i => D[i]);
-  let pts, corners = 0;
-  if (V.length >= 4 && V.length <= 10){
-    corners = V.length; pts = [];
-    const rad = j => { const A = V[(j - 1 + V.length) % V.length], B = V[j], C = V[(j + 1) % V.length];
-      return 0.14 * Math.min(Math.hypot(B[0] - A[0], B[1] - A[1]), Math.hypot(C[0] - B[0], C[1] - B[1])); };
-    const toward = (B, A, r) => { const l = Math.hypot(A[0] - B[0], A[1] - B[1]) || 1; return [B[0] + (A[0] - B[0]) * r / l, B[1] + (A[1] - B[1]) * r / l]; };
-    for (let j = 0; j < V.length; j++){
-      const A = V[(j - 1 + V.length) % V.length], B = V[j], C = V[(j + 1) % V.length], r = rad(j);
-      const p1 = toward(B, A, r), p2 = toward(B, C, r);
-      for (let t = 0; t <= 1.0001; t += 0.125){ const u = 1 - t; pts.push([u * u * p1[0] + 2 * u * t * B[0] + t * t * p2[0], u * u * p1[1] + 2 * u * t * B[1] + t * t * p2[1]]); }
-      const q2 = toward(C, B, rad((j + 1) % V.length)), len = Math.hypot(q2[0] - p2[0], q2[1] - p2[1]), n = Math.max(2, Math.round(len / (scale * 0.04)));
-      for (let k = 1; k < n; k++) pts.push([p2[0] + (q2[0] - p2[0]) * k / n, p2[1] + (q2[1] - p2[1]) * k / n]);
+  all.sort((p, q) => p - q);
+  const norm = all[Math.floor(all.length * 0.985)] || 1;
+  // printed text / logos / scratches: lots of edge energy ACROSS the ray around the spot → penalise
+  { const RA = new Float32Array(NA * NR);
+    for (let a = 0; a < NA; a++) for (let j = 0; j < NR; j++){ let rs = 0, ts = 0;
+      for (let da = -3; da <= 3; da++){ const aa = (a + da + NA) % NA; for (let dj = -4; dj <= 4; dj++){ const jj = j + dj; if (jj < 0 || jj >= NR) continue; rs += S[aa * NR + jj]; ts += TG[aa * NR + jj]; } }
+      RA[a * NR + j] = Math.max(0, ts - 0.9 * rs) / 63; }
+    for (let i = 0; i < NA * NR; i++) S[i] = Math.max(0, S[i] - 1.6 * RA[i]); }
+  const df = (F1 - F0) / (NR - 1), back = Math.max(2, Math.round(0.09 / df));
+  for (let a = 0; a < NA; a++){
+    const row = a * NR; let run = 0; const tmp = new Float32Array(NR);
+    for (let j = 0; j < NR; j++){
+      const f = F0 + (F1 - F0) * j / (NR - 1);
+      const v = rimless ? Math.min(0.32, S[row + j] / norm) + 0.22 * (f - F0)   // faint drilled edge: cap strong prints, prefer the outer edge
+                        : Math.min(1.25, S[row + j] / norm);
+      let prevMax = 0; for (let q = Math.max(0, j - back); q < j; q++) prevMax = Math.max(prevMax, tmp[q]);
+      tmp[j] = v;
+      S[row + j] = rimless ? v : v - 0.55 * Math.max(0, prevMax - 0.15);   // rimmed: damp the outer edge of the same rim
     }
+  }
+  // ---- 3) closed-path dynamic programming (two laps, keep the second)
+  const DJ = 3, LAM = 0.045, laps = 2, T = NA * laps;
+  let prev = new Float32Array(NR), cur = new Float32Array(NR);
+  const back2 = new Int16Array(T * NR);
+  for (let j = 0; j < NR; j++) prev[j] = S[j];
+  for (let s = 1; s < T; s++){
+    const row = (s % NA) * NR;
+    for (let j = 0; j < NR; j++){
+      let best = -1e9, bj = j;
+      for (let dj = -DJ; dj <= DJ; dj++){ const q = j + dj; if (q < 0 || q >= NR) continue;
+        const v = prev[q] - LAM * Math.abs(dj); if (v > best){ best = v; bj = q; } }
+      cur[j] = best + S[row + j]; back2[s * NR + j] = bj;
+    }
+    [prev, cur] = [cur, prev];
+  }
+  let jEnd = 0; for (let j = 1; j < NR; j++) if (prev[j] > prev[jEnd]) jEnd = j;
+  const path = new Int16Array(T); path[T - 1] = jEnd;
+  for (let s = T - 1; s > 0; s--) path[s - 1] = back2[s * NR + path[s]];
+  const fr = new Float32Array(NA); let good = 0, sum = 0;
+  for (let a = 0; a < NA; a++){ const j = path[NA + a] ?? path[a]; fr[a] = F0 + (F1 - F0) * j / (NR - 1); const v = S[a * NR + j]; sum += v; if (v > (rimless ? 0.24 : 0.18)) good++; }
+  // tiny circular median to kill 1–2° spikes
+  const med = new Float32Array(NA);
+  for (let a = 0; a < NA; a++){ const w = []; for (let q = -2; q <= 2; q++) w.push(fr[(a + q + NA) % NA]); w.sort((p, q) => p - q); med[a] = w[2]; }
+  let P = []; for (let a = 0; a < NA; a++){ const t = a / NA * Math.PI * 2, r = med[a] * E[a]; P.push([Math.cos(t) * r, Math.sin(t) * r]); }
+  const scale = (hw + hh) / 2;
+  // ---- 4) shape model
+  const area = Q => { let A = 0; for (let i = 0; i < Q.length; i++){ const p = Q[i], q = Q[(i + 1) % Q.length]; A += p[0] * q[1] - q[0] * p[1]; } return Math.abs(A) / 2; };
+  const hullOf = Q => { const R = Q.slice().sort((p, q) => p[0] - q[0] || p[1] - q[1]); const cr = (o, p, q) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+    const lo = [], up = []; for (const p of R){ while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    for (let i = R.length - 1; i >= 0; i--){ const p = R[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    up.pop(); lo.pop(); return lo.concat(up); };
+  const resample = (Q, M) => { const L = [0]; for (let i = 1; i <= Q.length; i++){ const p = Q[i - 1], q = Q[i % Q.length]; L.push(L[i - 1] + Math.hypot(q[0] - p[0], q[1] - p[1])); }
+    const out = [], tot = L[L.length - 1]; let s = 0;
+    for (let m = 0; m < M; m++){ const target = tot * m / M; while (L[s + 1] < target) s++; const p = Q[s], q = Q[(s + 1) % Q.length], u = (target - L[s]) / ((L[s + 1] - L[s]) || 1);
+      out.push([p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u]); } return out; };
+  const H0 = hullOf(P);
+  if (rimless || area(P) / area(H0) > 0.975) P = H0;                         // near-convex → wrap (nose-pad dents, glare gaps)
+  const M = 240; let Q = resample(P, M);
+  const wN = 5, turn = new Float32Array(M);
+  for (let i = 0; i < M; i++){ const a = Q[(i - wN + M) % M], b = Q[i], c = Q[(i + wN) % M];
+    const t1 = Math.atan2(b[1] - a[1], b[0] - a[0]), t2 = Math.atan2(c[1] - b[1], c[0] - b[0]); let dt = t2 - t1;
+    while (dt > Math.PI) dt -= 2 * Math.PI; while (dt < -Math.PI) dt += 2 * Math.PI; turn[i] = Math.abs(dt); }
+  const corners = [];
+  for (let i = 0; i < M; i++){
+    if (turn[i] < 0.42) continue;                                    // ≈ 24°
+    let isMax = true; for (let q = -6; q <= 6; q++) if (q && turn[(i + q + M) % M] > turn[i]) { isMax = false; break; }
+    if (isMax && !corners.some(c => Math.min(Math.abs(c - i), M - Math.abs(c - i)) < 9)) corners.push(i);
+  }
+  corners.sort((p, q) => p - q);
+  let out;
+  const smooth = (seg, w) => seg.map((p, i) => { if (i === 0 || i === seg.length - 1) return p; let x = 0, y = 0, m = 0;
+    for (let q = -w; q <= w; q++){ const s = seg[Math.min(seg.length - 1, Math.max(0, i + q))]; x += s[0]; y += s[1]; m++; } return [x / m, y / m]; });
+  if (corners.length < 3){
+    out = []; for (let i = 0; i < M; i++){ let x = 0, y = 0; for (let q = -4; q <= 4; q++){ const s = Q[(i + q + M) % M]; x += s[0]; y += s[1]; } out.push([x / 9, y / 9]); }
   } else {
-    pts = dense;   // smooth/round outline: the hull itself
-  }
-  // re-sample by angle from the centre so the outline stays star-shaped and evenly spaced for the lens mesh
-  {
-    const M = 180, out = [];
-    let cxp = 0, cyp = 0; pts.forEach(p => { cxp += p[0]; cyp += p[1]; }); cxp /= pts.length; cyp /= pts.length;
-    for (let k = 0; k < M; k++){
-      const t = k / M * Math.PI * 2, dx = Math.cos(t), dy = Math.sin(t); let best = 0;
-      for (let i = 0; i < pts.length; i++){
-        const a = pts[i], b = pts[(i + 1) % pts.length];
-        const ax = a[0] - cxp, ay = a[1] - cyp, bx = b[0] - cxp, by = b[1] - cyp, ex = bx - ax, ey = by - ay;
-        const den = dx * ey - dy * ex; if (Math.abs(den) < 1e-12) continue;
-        const u = (ax * ey - ay * ex) / den, v = (ax * dy - ay * dx) / den;
-        if (u > 0 && v >= 0 && v <= 1) best = Math.max(best, u);
-      }
-      out.push([cxp + dx * best, cyp + dy * best]);
+    // vertex = corner point; sides: straight if the path hugs the chord, else a smoothed curve
+    const V = corners.map(i => Q[i]), sides = [];
+    for (let c = 0; c < corners.length; c++){
+      const i0 = corners[c], i1 = corners[(c + 1) % corners.length], seg = [];
+      for (let i = i0; ; i = (i + 1) % M){ seg.push(Q[i]); if (i === i1) break; }
+      const A = seg[0], B = seg[seg.length - 1], L = Math.hypot(B[0] - A[0], B[1] - A[1]) || 1;
+      let dev = 0; for (const p of seg) dev = Math.max(dev, Math.abs((p[0] - A[0]) * (B[1] - A[1]) - (p[1] - A[1]) * (B[0] - A[0])) / L);
+      sides.push(dev < 0.022 * scale ? [A, B] : smooth(seg, 3));
     }
-    pts = out;
+    // join sides (sharp vertices), resample evenly, then a short smoothing → small real-lens fillet at corners,
+    // straight sides stay straight (averaging collinear points keeps a line), curves keep their bend
+    let poly = []; for (const sd of sides){ poly.push(...sd.slice(0, -1)); }
+    poly = resample(poly, 360);
+    const wts = [1, 2, 3, 2, 1];
+    out = poly.map((p, i) => { let x = 0, y = 0, m = 0; for (let q = -2; q <= 2; q++){ const s = poly[(i + q + 360) % 360], w = wts[q + 2]; x += s[0] * w; y += s[1] * w; m += w; } return [x / m, y / m]; });
   }
-  const polyFit = corners ? { corners } : null;
+  // back to image pixels, then star-shaped angular resample around the centroid (same as v1)
+  let pts = out.map(([x, y]) => [x / k, y / k]);
+  {
+    const MM = 180, o2 = []; let mx = 0, my = 0; pts.forEach(p => { mx += p[0]; my += p[1]; }); mx /= pts.length; my /= pts.length;
+    for (let m = 0; m < MM; m++){
+      const t = m / MM * Math.PI * 2, dx = Math.cos(t), dy = Math.sin(t); let best = 0;
+      for (let i = 0; i < pts.length; i++){ const a = pts[i], b = pts[(i + 1) % pts.length];
+        const ax = a[0] - mx, ay = a[1] - my, ex = b[0] - a[0], ey = b[1] - a[1], den = dx * ey - dy * ex; if (Math.abs(den) < 1e-12) continue;
+        const u = (ax * ey - ay * ex) / den, v = (ax * dy - ay * dx) / den; if (u > 0 && v >= 0 && v <= 1) best = Math.max(best, u); }
+      o2.push([mx + dx * best, my + dy * best]);
+    }
+    pts = o2;
+  }
+  const quality = Math.min(1, 0.35 + 0.65 * good / NA);
+  const icx = bcx, icy = bcy;
   // preview crop with the traced outline
-  const pad = 1.6, sx = Math.max(0, cx - hw * pad), sy = Math.max(0, cy - hh * pad), sw = Math.min(W - sx, hw * 2 * pad), sh = Math.min(H - sy, hh * 2 * pad);
-  const pv = document.createElement('canvas'); const sc = 150 / Math.max(sw, sh); pv.width = Math.round(sw * sc); pv.height = Math.round(sh * sc);
-  const p = pv.getContext('2d'); p.drawImage(cv, sx, sy, sw, sh, 0, 0, pv.width, pv.height);
-  p.strokeStyle = '#a3e635'; p.lineWidth = 2; p.beginPath();
-  pts.forEach(([x, y], i) => { const X = (cx + x - sx) * sc, Y = (cy - y - sy) * sc; i ? p.lineTo(X, Y) : p.moveTo(X, Y); });
-  p.closePath(); p.stroke();
+  const pv = document.createElement('canvas'); const ps = 1.6, px0 = Math.max(0, icx - bhw * ps), py0 = Math.max(0, icy - bhh * ps), pw = Math.min(W - px0, bhw * 2 * ps), ph = Math.min(H - py0, bhh * 2 * ps);
+  const sc = 150 / Math.max(pw, ph); pv.width = Math.round(pw * sc); pv.height = Math.round(ph * sc);
+  const pc = pv.getContext('2d'); pc.drawImage(cv, px0, py0, pw, ph, 0, 0, pv.width, pv.height);
+  pc.strokeStyle = '#a3e635'; pc.lineWidth = 2; pc.beginPath();
+  pts.forEach(([x, y], i) => { const X = (icx + x - px0) * sc, Y = (icy - y - py0) * sc; i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); });
+  pc.closePath(); pc.stroke();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-  lastTrace = { cv, cx, cy, hw, hh };
-  return { pts, quality, corners: polyFit ? polyFit.corners : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
+  lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh };
+  return { pts, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
 }
 
 /* Offline lens locator: the user drags a box around ONE lens (finger or mouse); returns normalised {x0,y0,x1,y1}. */
@@ -1449,7 +1468,7 @@ async function traceFrame(file){
     const ok = box && [box.x0, box.y0, box.x1, box.y1].every(v => isFinite(+v) && +v >= 0 && +v <= 1) && Math.abs(box.x1 - box.x0) > 0.05 && Math.abs(box.y1 - box.y0) > 0.03;
     if (!ok) throw new Error('bad box');
     note.textContent = '✏️ بتتبع حافة الإطار…';
-    const tr = traceLens(img, { x0:+box.x0, y0:+box.y0, x1:+box.x1, y1:+box.y1 });
+    const tr = traceLens(img, { x0:+box.x0, y0:+box.y0, x1:+box.x1, y1:+box.y1 }, { rimless:state.frame === 'rimless' });
     customPreview = tr.preview;
     const preset = SHAPE_NAME[box.shape] && box.shape !== 'custom' ? box.shape : null;
     const boxAspect = Math.abs(box.x1 - box.x0) * img.cv.width / (Math.abs(box.y1 - box.y0) * img.cv.height);
@@ -2241,6 +2260,7 @@ goView('iso', true);
 requestAnimationFrame(animate);
 
 // expose for debugging
+window.__trace = { loadImageData, traceLens, get last(){ return lastTrace; } };
 window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, get state(){ return state; }, get root(){ return root; }, get stats(){ return lastStats; } };
 </script>
 <script>if(/IHABApk(?!Full)/.test(navigator.userAgent)||/[?&]apk=1/.test(location.search)){const c=document.getElementById('cardBtn');if(c)c.style.display='none';}</script>
@@ -2248,7 +2268,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 30;
+const APP_V = 31;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
