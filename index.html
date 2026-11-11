@@ -1573,36 +1573,55 @@ function renderStats(){
 
 /* ---- OCR ---- */
 const snap = (v, st, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v / st) * st));
+/* ===== Offline Rx reading (no Claude): cleanup → Tesseract (block mode) → table-aware parser ===== */
+// Screen photos have moiré stripes: shrink + blur kills them, then stretch contrast and enlarge for the OCR.
+async function prepRxImage(file){
+  const bmp = await createImageBitmap(file);
+  const w1 = Math.min(900, bmp.width), h1 = Math.round(bmp.height * w1 / bmp.width);
+  const c1 = document.createElement('canvas'); c1.width = w1; c1.height = h1;
+  const x1 = c1.getContext('2d'); x1.filter = 'grayscale(1) blur(1.2px)'; x1.drawImage(bmp, 0, 0, w1, h1);
+  const d = x1.getImageData(0, 0, w1, h1), p = d.data, hist = new Uint32Array(256);
+  for (let i = 0; i < p.length; i += 4) hist[p[i]]++;
+  const n = w1 * h1; let lo = 0, hi = 255, acc = 0;
+  for (; lo < 255 && (acc += hist[lo]) < n * .02; lo++);
+  acc = 0; for (; hi > 0 && (acc += hist[hi]) < n * .02; hi--);
+  const k = 255 / Math.max(1, hi - lo);
+  for (let i = 0; i < p.length; i += 4){ const v = Math.max(0, Math.min(255, (p[i] - lo) * k)); p[i] = p[i + 1] = p[i + 2] = v; }
+  x1.putImageData(d, 0, 0);
+  const c2 = document.createElement('canvas'); c2.width = w1 * 2; c2.height = h1 * 2;
+  const x2 = c2.getContext('2d'); x2.imageSmoothingQuality = 'high'; x2.drawImage(c1, 0, 0, c2.width, c2.height);
+  return c2;
+}
+// Reads each eye row as: SPH, CYL, AXIS, (ADD), …, PD. OCR often drops the small minus sign, so:
+// an explicit "+" stays plus; anything else with a value is taken as minus (CYL is always minus-cyl on printed slips).
 function parseRx(raw){
-  const text = raw.replace(/,/g, '.').replace(/[−–—]/g, '-').toUpperCase();
+  const text = String(raw || '').replace(/,/g, '.').replace(/[−–—~“”"'`’‘_]/g, '-').toUpperCase();
   const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-  const out = {};
-  const grab = line => (line.match(/[+-]?\d{1,3}(?:\.\d{1,2})?/g) || []).map(Number).filter(v => Math.abs(v) <= 180);
-  const assign = (eye, nums) => {
-    const powers = []; let axis = null;
-    for (const v of nums){
-      if (powers.length < 2 && Math.abs(v) <= 25) powers.push(v);
-      else if (axis === null && Number.isInteger(v) && v >= 0 && v <= 180) axis = v;
-    }
-    let sph = powers[0] ?? 0, cyl = powers[1] ?? 0, ax = axis ?? 0;
-    if (cyl > 0){ sph += cyl; cyl = -cyl; ax = ((ax + 89) % 180) + 1; }  // transpose to minus-cyl
-    out[eye] = { sph, cyl, axis:ax };
-  };
-  const eyeOf = l => /(^|[^A-Z])(OD|R|RE|RIGHT)([^A-Z]|$)/.test(l) ? 'R' : (/(^|[^A-Z])(OS|L|LE|LEFT)([^A-Z]|$)/.test(l) ? 'L' : null);
-  const loose = [];
+  const out = {}, hasPdCol = /\bP\.?D\b|\bPO\b/.test(text);
+  const eyeOf = l => /^(\W*)(OD|0D|QD|R|RE|RT|RIGHT)\b/.test(l) ? 'R' : (/^(\W*)(OS|0S|QS|L|LE|LT|LEFT)\b/.test(l) ? 'L' : null);
+  const toks = l => [...l.replace(/^(\W*)(OD|0D|QD|OS|0S|QS|RIGHT|LEFT|RE|LE|RT|LT|R|L)\b/, '').matchAll(/([+-]?)\s?(\d{1,3}(?:\.\d{1,2})?)/g)]
+    .map(m => ({ s:m[1], v:parseFloat(m[2]), dec:m[2].includes('.') }));
+  const signed = (t, forceMinus) => t.v === 0 ? 0 : (t.s === '+' && !forceMinus ? t.v : -t.v);
   for (const line of lines){
-    if (/P\.?D/.test(line) && !/(OD|OS)/.test(line)) continue;
-    const nums = grab(line); if (!nums.length) continue;
-    const e = eyeOf(line);
-    if (e && !out[e]) assign(e, nums); else if (!e && nums.length >= 2) loose.push(nums);
+    const e = eyeOf(line); if (!e || out[e]) continue;
+    const t = toks(line); if (t.length < 1) continue;
+    let i = 0; const r = { sph:0, cyl:0, axis:0 };
+    if (t[i] && t[i].v <= 25){ r.sph = signed(t[i]); i++; }
+    if (t[i] && t[i].v <= 10 && (t[i].dec || t[i].v === 0)){ r.cyl = signed(t[i], true); i++; }
+    if (t[i] && Number.isInteger(t[i].v) && t[i].v <= 180 && !t[i].dec){ r.axis = t[i].v; i++; }
+    if (r.axis > 180) r.axis = 0;
+    if (t[i] && t[i].dec && t[i].v <= 4) i++;                       // ADD
+    const last = t[t.length - 1];
+    if (hasPdCol && t.length - 1 >= i && last && last.v >= 20 && last.v <= 40) r.pd = last.v;
+    out[e] = r;
   }
-  if (!out.R && loose.length) assign('R', loose.shift());
-  if (!out.L && loose.length) assign('L', loose.shift());
-  const pdm = text.match(/(?:I\.?\s?P\.?\s?D|P\.?\s?D|MPD|DPD)\.?[^0-9]{0,8}(\d{2}(?:\.\d)?)/);   // PD = IPD if (pdm) out.pd = parseFloat(pdm[1]);
-  const mr = text.match(/(?:I?\.?P\.?D|MONO|MPD)[^\n]{0,10}\b(?:R|OD|RIGHT)\b[^0-9]{0,6}(\d{2}(?:\.\d)?)/), ml = text.match(/(?:I?\.?P\.?D|MONO|MPD)[^\n]{0,10}\b(?:L|OS|LEFT)\b[^0-9]{0,6}(\d{2}(?:\.\d)?)/);
-  if (mr) out.pdR = parseFloat(mr[1]); if (ml) out.pdL = parseFloat(ml[1]);
+  if (out.R) out.R.axis = out.R.cyl ? out.R.axis : 0;
+  if (out.L) out.L.axis = out.L.cyl ? out.L.axis : 0;
+  if (out.R?.pd) out.pdR = out.R.pd; if (out.L?.pd) out.pdL = out.L.pd;
+  if (!out.pdR && !out.pdL){ const m = text.match(/(?:I\.?P\.?D|P\.?D)\.?[^0-9\n]{0,8}(\d{2}(?:\.\d)?)/); if (m && +m[1] >= 50 && +m[1] <= 80) out.pd = +m[1]; }
   return out;
 }
+window.__prepRx = prepRxImage; window.__parseRx = parseRx;
 /* Reading the Rx photo:
    1) Inside Claude (published page): the image is read by Claude itself via the `sample` capability (most accurate,
       handles handwriting / printed tables, numbers only).
@@ -1686,14 +1705,20 @@ async function runOCR(file){
     }
   }
   if (typeof Tesseract === 'undefined'){ st.textContent = 'تعذّر تحميل مكتبة OCR — اتأكد من الإنترنت'; return; }
-  st.textContent = 'جاري قراءة الصورة…';
+  st.textContent = '🔎 بنضّف الصورة وبقراها…';
   try{
-    const { data:{ text } } = await Tesseract.recognize(file, 'eng', {
-      logger: m => { if (m.status === 'recognizing text') st.textContent = `جاري التعرّف على النص ${Math.round(m.progress * 100)}%`; }
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => { if (m.status === 'recognizing text') st.textContent = `🔎 جاري القراءة ${Math.round(m.progress * 100)}%`; }
     });
+    await worker.setParameters({ tessedit_pageseg_mode:'6', preserve_interword_spaces:'1' });
+    const { data:{ text } } = await worker.recognize(await prepRxImage(file));
+    await worker.terminate();
     $('ocrText').value = text; $('ocrText').style.display = 'block';
     const n = applyRx(parseRx(text));
-    st.textContent = n ? `تمت القراءة: ${n} عين — راجع القيم قبل الاعتماد` : 'ملقتش قيم واضحة — دخّلها يدوي';
+    if (n){
+      document.querySelectorAll('#mRx .sub').forEach(x => { if (/مقاسات النظر|المسافة الحدقية/.test(x.textContent)) x.classList.add('open'); });
+      st.textContent = `✅ اتقرت ${n} عين — راجع القيم والإشارات (− / +) قبل الاعتماد`;
+    } else st.textContent = 'ملقتش قيم واضحة — صوّر الروشتة مستقيمة ومن قريب، أو دخّلها يدوي';
   } catch(err){ console.error(err); st.textContent = 'حصل خطأ أثناء القراءة'; }
 }
 /* Frame size from the temple marking, e.g. "52□18-140", "52-18 140", "54 ▢ 17 145" → A (eye size), DBL, temple. */
