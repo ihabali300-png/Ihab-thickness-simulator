@@ -17,11 +17,11 @@ jobs:
       - name: Build
         run: gradle -p android assembleRelease --no-daemon
       - name: Rename
-        run: cp android/app/build/outputs/apk/release/app-release.apk IHAB-Lens-Simulator.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk IHAB-LensForm-3D.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: IHAB Lens Simulator v1.0.${{ github.run_number }}
-          body: "تطبيق محاكي سُمك العدسات — نزّل ملف IHAB-Lens-Simulator.apk وثبّته."
-          files: IHAB-Lens-Simulator.apk
+          name: IHAB LensForm 3D v1.0.${{ github.run_number }}
+          body: "IHAB LensForm 3D — محاكي سُمك العدسات. نزّل ملف IHAB-LensForm-3D.apk وثبّته."
+          files: IHAB-LensForm-3D.apk
           make_latest: true
