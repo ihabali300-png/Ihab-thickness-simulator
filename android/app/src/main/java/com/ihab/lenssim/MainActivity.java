@@ -6,6 +6,9 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -22,6 +25,8 @@ public class MainActivity extends Activity {
     private WebView web;
     private ValueCallback<Uri[]> pending;
     private Uri cameraUri;
+    private PermissionRequest pendingPerm;
+    private static final int CAM_PERM = 42;
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -43,6 +48,16 @@ public class MainActivity extends Activity {
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
+            @Override public void onPermissionRequest(final PermissionRequest req) {
+                runOnUiThread(() -> {
+                    boolean wantsCam = false;
+                    for (String r : req.getResources()) if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) wantsCam = true;
+                    if (!wantsCam) { req.deny(); return; }
+                    if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        req.grant(new String[]{ PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+                    } else { pendingPerm = req; requestPermissions(new String[]{ Manifest.permission.CAMERA }, CAM_PERM); }
+                });
+            }
             @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
                 if (pending != null) pending.onReceiveValue(null);
                 pending = cb;
@@ -56,11 +71,20 @@ public class MainActivity extends Activity {
                         intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
                         intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     } catch (Exception e) { cameraUri = null; intent = p.createIntent(); }
-                } else {                              // gallery
+                } else {                              // gallery / files (images, PDF, anything the page accepts)
                     cameraUri = null;
                     intent = new Intent(Intent.ACTION_GET_CONTENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("image/*");
+                    java.util.ArrayList<String> types = new java.util.ArrayList<>();
+                    boolean any = false;
+                    for (String t : p.getAcceptTypes()) {
+                        for (String x : t.split(",")) { x = x.trim(); if (x.isEmpty()) continue; if (x.equals("*/*")) any = true; else if (x.contains("/")) types.add(x); else if (x.equals(".pdf")) types.add("application/pdf"); }
+                    }
+                    if (any) intent.setType("*/*");
+                    else if (types.isEmpty()) intent.setType("image/*");
+                    else if (types.size() == 1) intent.setType(types.get(0));
+                    else { intent.setType("*/*"); intent.putExtra(Intent.EXTRA_MIME_TYPES, types.toArray(new String[0])); }
+                    if (p.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                 }
                 try { startActivityForResult(intent, PICK); }
                 catch (ActivityNotFoundException e) { pending.onReceiveValue(null); pending = null; return false; }
@@ -75,9 +99,21 @@ public class MainActivity extends Activity {
         Uri[] out = null;
         if (res == RESULT_OK) {
             if (cameraUri != null) out = new Uri[]{ cameraUri };
+            else if (data != null && data.getClipData() != null) {
+                int n = data.getClipData().getItemCount(); out = new Uri[n];
+                for (int i = 0; i < n; i++) out[i] = data.getClipData().getItemAt(i).getUri();
+            }
             else if (data != null && data.getData() != null) out = new Uri[]{ data.getData() };
         }
         pending.onReceiveValue(out); pending = null;
+    }
+
+    @Override public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        if (code == CAM_PERM && pendingPerm != null) {
+            if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) pendingPerm.grant(new String[]{ PermissionRequest.RESOURCE_VIDEO_CAPTURE });
+            else pendingPerm.deny();
+            pendingPerm = null;
+        }
     }
 
     @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); web.saveState(out); }

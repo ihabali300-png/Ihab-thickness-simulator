@@ -123,6 +123,29 @@
   #editBar{ display:none; justify-content:space-between; align-items:center; gap:8px; background:#0b1f2a; border:1px solid #38bdf888; border-radius:10px;
             padding:8px 10px; margin:0 0 8px; color:#bae6fd; font-size:13px; direction:rtl; }
   #editBar button{ background:none; border:1px solid #f8717188; color:#fca5a5; border-radius:8px; padding:5px 8px; font-size:12px; cursor:pointer; font-family:inherit; }
+  .codebox{ display:flex; gap:6px; align-items:stretch; }
+  .codebox input{ flex:1; min-width:0; }
+  #qrBtn{ flex:none; background:#030a05; color:var(--lime); border:1px solid var(--lime); border-radius:8px; padding:0 10px; font-weight:800; font-size:14px; cursor:pointer; font-family:Consolas, monospace; }
+  .att-h{ color:var(--lime); font-weight:800; font-size:13.5px; margin:10px 2px 6px; }
+  .att-btns{ display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+  .att-btns label{ position:relative; overflow:hidden; text-align:center; background:#030a05; color:#e7f7d2; border:1px solid #a3e63566; border-radius:9px; padding:9px 2px; font-size:13px; font-weight:700; cursor:pointer; }
+  .att-btns input{ position:absolute; inset:0; opacity:0; }
+  #attList{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .chip{ display:inline-flex; align-items:center; gap:6px; max-width:100%; background:#173a22; border:1px solid #a3e63566; border-radius:16px; padding:4px 6px 4px 10px; font-size:12.5px; color:#ecfccb; direction:ltr; }
+  .chip a, .chip span{ color:#d9f99d; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:190px; }
+  .chip img{ width:26px; height:26px; object-fit:cover; border-radius:5px; }
+  .chip button{ background:none; border:none; color:#fca5a5; font-size:14px; cursor:pointer; padding:0 2px; }
+  .chip.saved{ background:#0b1f2a; border-color:#38bdf866; }
+  #qrOv{ position:fixed; inset:0; z-index:900; background:#000; display:none; flex-direction:column; }
+  #qrOv.on{ display:flex; }
+  .qr-top{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; color:#d9f99d; font-weight:700; font-size:14.5px; direction:rtl; }
+  .qr-top button{ background:none; border:1px solid #a3e63588; color:#d9f99d; border-radius:9px; width:38px; height:36px; font-size:18px; }
+  .qr-wrap{ position:relative; flex:1; overflow:hidden; }
+  #qrVid{ width:100%; height:100%; object-fit:cover; }
+  .qr-frame{ position:absolute; left:12%; right:12%; top:30%; height:28%; border:3px solid var(--lime); border-radius:14px; box-shadow:0 0 0 9999px #0008, 0 0 18px #a3e635aa; }
+  .qr-bot{ padding:14px; display:flex; justify-content:center; }
+  .qr-photo{ position:relative; overflow:hidden; background:#173a22; color:#ecfccb; border:1px solid var(--lime); border-radius:10px; padding:10px 18px; font-weight:800; }
+  .qr-photo input{ position:absolute; inset:0; opacity:0; }
 </style>
 </head>
 <body>
@@ -136,11 +159,15 @@
   <button class="tbtn main" id="newBtn">📄<span>جديد</span></button>
 </nav>
 
+<div id="qrOv"><div class="qr-top"><span id="qrMsg">وجّه الكاميرا على QR أو باركود الفريم</span><button id="qrClose">✕</button></div>
+  <div class="qr-wrap"><video id="qrVid" playsinline muted></video><div class="qr-frame"></div></div>
+  <div class="qr-bot"><label class="qr-photo">📸 صوّره بدل كده<input type="file" id="qrPhoto" accept="image/*" capture="environment"></label></div>
+</div>
 <main>
   <div class="sub"><button class="sbh"><span>📋 بيانات الطلب</span></button><div class="sbb"><div class="in"><div class="pad">
     <div class="f wide">
       <div class="head"><span class="ar">🏷️ كود الفريم</span><span class="en">Frame Code</span></div>
-      <input type="text" id="code" placeholder="مثال: SPE-000836-0718" autocomplete="off">
+      <div class="codebox"><input type="text" id="code" placeholder="مثال: SPE-000836-0718" autocomplete="off"><button id="qrBtn" type="button" title="امسح QR / باركود">▦ QR</button></div>
     </div>
     <div class="f wide">
       <div class="head"><span class="ar">🧾 رقم الأوردر</span><span class="en">Order No</span></div>
@@ -150,6 +177,13 @@
 <div id="fields"></div>
   <div class="sub"><button class="sbh"><span>📝 ملاحظات</span></button><div class="sbb"><div class="in"><div class="pad">
     <textarea id="notes" placeholder="أي ملاحظة عن التظبيط..."></textarea>
+    <div class="att-h">📎 المرفقات</div>
+    <div class="att-btns">
+      <label>📷 كاميرا<input type="file" id="attCam" accept="image/*" capture="environment"></label>
+      <label>🖼️ الاستديو<input type="file" id="attGal" accept="image/*" multiple></label>
+      <label>📄 ملف<input type="file" id="attFile" accept="application/pdf,image/*,*/*" multiple></label>
+    </div>
+    <div id="attList"></div>
   </div></div></div></div>
   <div id="editBar"><span id="editTxt"></span><button id="editCancel">✕ إلغاء التعديل</button></div>
   <button class="save" id="saveBtn">💾 حفظ في الشيت</button>
@@ -220,6 +254,57 @@ FIELDS.forEach(([k]) => $(k).addEventListener('change', checkRanges));
 const ORDER_PREFIX = 'TBK-2500';
 const orderFull = () => { const t = $('order').value.trim(); return t ? ORDER_PREFIX + t : ''; };
 function zeroMeasures(){ FIELDS.forEach(([k]) => { $(k).value = '0'; }); checkRanges(); }
+/* ---- 📎 attachments: new files (uploaded to Drive on save) + links already saved with the record ---- */
+let attNew = [], attSaved = [];
+const MAX_MB = 15;
+function renderAtt(){
+  const box = $('attList'); box.innerHTML = '';
+  attSaved.forEach((u, i) => {
+    const c = document.createElement('div'); c.className = 'chip saved';
+    c.innerHTML = `<a href="${u}" target="_blank" rel="noopener">📎 مرفق ${i + 1}</a><button title="شيل">✕</button>`;
+    c.querySelector('button').onclick = () => { attSaved.splice(i, 1); renderAtt(); };
+    box.appendChild(c);
+  });
+  attNew.forEach((f, i) => {
+    const c = document.createElement('div'); c.className = 'chip';
+    const isImg = /^image\//.test(f.type);
+    c.innerHTML = (isImg ? `<img src="${URL.createObjectURL(f)}">` : '📄') + `<span>${f.name}</span><button title="شيل">✕</button>`;
+    c.querySelector('button').onclick = () => { attNew.splice(i, 1); renderAtt(); };
+    box.appendChild(c);
+  });
+}
+['attCam', 'attGal', 'attFile'].forEach(id => $(id).addEventListener('change', e => {
+  for (const f of e.target.files){
+    if (f.size > MAX_MB * 1048576){ setStatus(`⚠️ الملف ${f.name} أكبر من ${MAX_MB} ميجا`, true); continue; }
+    attNew.push(f);
+  }
+  e.target.value = ''; renderAtt();
+}));
+// photos are shrunk to 1600 px JPEG before upload (fast on mobile data); PDFs/others go as they are
+async function fileToB64(f){
+  let blob = f, name = f.name || 'file', mime = f.type || 'application/octet-stream';
+  if (/^image\//.test(mime) && !/gif|svg/.test(mime)){
+    try{
+      const bmp = await createImageBitmap(f), k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.82)); mime = 'image/jpeg'; name = name.replace(/\.\w+$/, '') + '.jpg';
+    }catch(e){}
+  }
+  const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+  return { name, mime, data:b64 };
+}
+async function uploadAll(prefix){
+  const urls = [];
+  for (let i = 0; i < attNew.length; i++){
+    setStatus(`⏳ برفع المرفقات ${i + 1}/${attNew.length}…`);
+    const p = await fileToB64(attNew[i]);
+    const j = await api('upload', { ...p, name:`${prefix}_${i + 1}_${p.name}` });
+    urls.push(j.url);
+  }
+  return urls;
+}
+
 let editKey = null;   // [date, code, order] of the record being edited
 function setEdit(key){
   editKey = key;
@@ -230,9 +315,63 @@ function setEdit(key){
 function resetForm(){
   setEdit(null);
   $('code').value = ''; $('order').value = ''; $('notes').value = '';
+  attNew = []; attSaved = []; renderAtt();
   zeroMeasures(); setStatus('');
 }
 $('newBtn').addEventListener('click', resetForm);
+/* ---- ▦ QR / barcode → Frame Code. Native BarcodeDetector when the phone has it, ZXing otherwise ---- */
+const QR_FORMATS = ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8', 'upc_a', 'data_matrix', 'itf', 'codabar'];
+let qrStream = null, qrStop = null;
+function qrFound(txt){
+  txt = String(txt || '').trim(); if (!txt) return;
+  if (navigator.vibrate) try{ navigator.vibrate(60); }catch(e){}
+  closeQR();
+  document.querySelectorAll('.sub').forEach(x => { if (x.querySelector('#code')) x.classList.add('open'); });
+  $('code').value = txt; setStatus(`✅ اتقرا الكود: ${txt}`);
+}
+function closeQR(){
+  if (qrStop) try{ qrStop(); }catch(e){} qrStop = null;
+  if (qrStream) qrStream.getTracks().forEach(t => t.stop()); qrStream = null;
+  $('qrOv').classList.remove('on');
+}
+let zxingP = null;
+const loadZX = () => zxingP || (zxingP = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js'; sc.onload = () => res(window.ZXing); sc.onerror = rej; document.head.appendChild(sc); }));
+async function nativeDetector(){
+  if (!('BarcodeDetector' in window)) return null;
+  try{ const ok = await BarcodeDetector.getSupportedFormats(); const f = QR_FORMATS.filter(x => ok.includes(x)); return f.length ? new BarcodeDetector({ formats:f }) : null; }catch(e){ return null; }
+}
+$('qrBtn').addEventListener('click', async () => {
+  $('qrOv').classList.add('on'); $('qrMsg').textContent = 'وجّه الكاميرا على QR أو باركود الفريم';
+  const vid = $('qrVid');
+  try{
+    qrStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1280 }, height:{ ideal:720 } }, audio:false });
+    vid.srcObject = qrStream; await vid.play();
+  }catch(e){ console.error(e); $('qrMsg').textContent = '📷 الكاميرا مش متاحة هنا — دوس «صوّره بدل كده»'; return; }
+  const det = await nativeDetector();
+  if (det){
+    let alive = true; qrStop = () => { alive = false; };
+    const tick = async () => { if (!alive) return; try{ const r = await det.detect(vid); if (r && r[0]) return qrFound(r[0].rawValue); }catch(e){} setTimeout(tick, 180); };
+    tick();
+  } else {
+    try{
+      const ZX = await loadZX(), reader = new ZX.BrowserMultiFormatReader();
+      qrStop = () => reader.reset();
+      reader.decodeFromStream(qrStream, vid, (res) => { if (res) qrFound(res.getText()); });
+    }catch(e){ console.error(e); $('qrMsg').textContent = 'مقدرتش أشغّل القارئ — دوس «صوّره بدل كده»'; }
+  }
+});
+$('qrClose').addEventListener('click', closeQR);
+$('qrPhoto').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  $('qrMsg').textContent = '🔎 بقرا الكود من الصورة…';
+  try{
+    const det = await nativeDetector();
+    if (det){ const r = await det.detect(await createImageBitmap(f)); if (r && r[0]) return qrFound(r[0].rawValue); }
+    const ZX = await loadZX(), url = URL.createObjectURL(f);
+    const res = await new ZX.BrowserMultiFormatReader().decodeFromImageUrl(url);
+    return qrFound(res.getText());
+  }catch(err){ console.error(err); $('qrMsg').textContent = 'ملقتش كود في الصورة — قرّب أكتر وخلّي الكود واضح'; }
+});
 $('editCancel').addEventListener('click', () => { resetForm(); setStatus('اتلغى التعديل'); });
 // ريست: zero every measurement (keeps code / order so you can fix a mistake quickly)
 $('resetBtn').addEventListener('click', () => { resetForm(); setStatus('↺ كل الخانات اتمسحت'); });
@@ -266,8 +405,9 @@ $('saveBtn').addEventListener('click', async () => {
   const btn = $('saveBtn'); btn.disabled = true; setStatus('⏳ جاري الحفظ…');
   const v = k => parseFloat($(k).value);
   if (editKey){
-    const row = [editKey[0], code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim()];
     try{
+      const links = [...attSaved, ...(await uploadAll((order || code || 'card').replace(/[^\w-]/g, '')))];
+      const row = [editKey[0], code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim(), links.join(' | ')];
       const j = await api('update', { key:editKey, row });
       if (!j.updated) throw new Error('not found');
       resetForm(); allRows = null; setStatus('✅ التعديل اتحفظ في الشيت');
@@ -275,7 +415,13 @@ $('saveBtn').addEventListener('click', async () => {
     finally{ btn.disabled = false; }
     return;
   }
-  const row = [stamp(), code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim()];
+  let links = [];
+  if (attNew.length){
+    try{ links = await uploadAll((order || code || 'card').replace(/[^\w-]/g, '')); }
+    catch(e){ console.error(e); btn.disabled = false;
+      setStatus(e.message === 'unknown action' ? '⚠️ كود الشيت لسه قديم — حدّثه وانشره إصدار جديد عشان المرفقات تشتغل' : '⚠️ المرفقات مترفعتش — اتأكد من النت وجرب تاني (السجل متحفظش لسه)', true); return; }
+  }
+  const row = [stamp(), code, order, v('panto'), v('wrap'), v('bvd'), v('segR'), v('segL'), v('pdR'), v('pdL'), v('pdR') + v('pdL'), $('notes').value.trim(), links.join(' | ')];
   setQ([...getQ(), row]);
   resetForm(); allRows = null;
   try{
@@ -288,6 +434,8 @@ addEventListener('online', () => flushQ().then(n => n && setStatus(`✅ اترف
 function loadRow(r){
   const ord = String(r[2] || '');
   $('code').value = r[1] || ''; $('order').value = ord.startsWith(ORDER_PREFIX) ? ord.slice(ORDER_PREFIX.length) : ord; $('notes').value = r[11] || '';
+  attSaved = String(r[12] || '').split('|').map(x => x.trim()).filter(Boolean); attNew = []; renderAtt();
+  if (attSaved.length) document.querySelectorAll('.sub').forEach(x => { if (x.querySelector('#notes')) x.classList.add('open'); });
   FIELDS.forEach(([k], i) => {
     const val = num(r[3 + i]), sel = $(k);
     const opt = [...sel.options].reduce((b, o) => Math.abs(parseFloat(o.value) - val) < Math.abs(parseFloat(b.value) - val) ? o : b, sel.options[0]);
