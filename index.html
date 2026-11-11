@@ -1507,7 +1507,7 @@ const ATT_SUB = { B:'📐', D:'🕶️' };
 function subOf(icon){ return [...document.querySelectorAll('#mFrame .sub')].find(x => x.querySelector('.sbh').textContent.trim().startsWith(icon)); }
 (() => {
   const b = subOf('📐').querySelector('.sbh span'), d = subOf('🕶️').querySelector('.sbh span');
-  b.insertAdjacentHTML('beforeend', '<i class="adot"></i>');
+  b.insertAdjacentHTML('beforeend', '<i class="adot"></i><small class="req">إلزامي</small>');
   d.insertAdjacentHTML('beforeend', '<i class="adot"></i><small class="req">إلزامي</small>');
 })();
 function setAtt(k, on){
@@ -1518,7 +1518,10 @@ function setAtt(k, on){
 }
 [aRow, dRow].forEach(r => ['change', 'wheelclose'].forEach(ev => r.addEventListener(ev, () => setAtt('B', true))));
 ['change', 'wheelclose'].forEach(ev => { bRow.addEventListener(ev, () => setAtt('B', false)); $('depthRow').addEventListener(ev, () => setAtt('D', false)); });
-document.querySelectorAll('#frameBtns .gbtn').forEach(btn => btn.addEventListener('click', () => setAtt('D', state.frame !== 'rimless')));
+document.querySelectorAll('#frameBtns .gbtn').forEach(btn => btn.addEventListener('click', () => { setAtt('B', true); setAtt('D', state.frame !== 'rimless'); }));
+// every new customer starts with both reminders on (B always; Depth unless rimless)
+function armReminders(){ setAtt('B', true); setAtt('D', state.frame !== 'rimless'); }
+armReminders();
 ['armCam', 'armFile'].forEach(id => $(id).addEventListener('change', e => { if (e.target.files && e.target.files.length) setAtt('B', true); }));
 
 /* Curtains: one main section open at a time; sub-sections toggle in place */
@@ -1606,7 +1609,7 @@ document.querySelectorAll('.rst').forEach(b => b.addEventListener('click', () =>
 
 // New session
 $('newBtn').addEventListener('click', () => {
-  try{ setAtt('B', false); setAtt('D', false); }catch(e){}
+  setTimeout(() => { try{ armReminders(); }catch(e){} }, 0);
   state = structuredClone(DEFAULTS);
   $('ocrText').value = ''; $('ocrText').style.display = 'none';
   $('ocrFile').value = ''; $('ocrCam').value = '';
@@ -2144,7 +2147,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 27;
+const APP_V = 28;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
