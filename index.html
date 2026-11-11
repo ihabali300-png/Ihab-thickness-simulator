@@ -2087,7 +2087,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updToast"></div>
 <script>
 /* ⟳ Update: checks version.json; tap to wipe the offline copy and load the newest version */
-const APP_V = 21;
+const APP_V = 22;
 (() => {
   const btn = document.getElementById('updBtn'), toast = document.getElementById('updToast');
   const say = (t, ms = 3500) => { toast.textContent = t; toast.style.display = 'block'; clearTimeout(say.t); say.t = setTimeout(() => toast.style.display = 'none', ms); };
