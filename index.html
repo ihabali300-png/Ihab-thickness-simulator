@@ -1649,13 +1649,68 @@ const snap = (v, st, lo, hi) => Math.min(hi, Math.max(lo, Math.round(v / st) * s
 /* ===== Offline Rx reading (no Claude) — runs fully on the phone =====
    Pass A: shrink + blur (kills moiré stripes of screen photos) → contrast → enlarge.
    Pass B (if A misses an eye): sharp version for paper / small print. */
-async function prepRxImage(file, mode = 'A'){
-  const bmp = await createImageBitmap(file);
+function stretch(ctx, w, h){
+  const d = ctx.getImageData(0, 0, w, h), p = d.data, hist = new Uint32Array(256);
+  for (let i = 0; i < p.length; i += 4) hist[p[i]]++;
+  const n = w * h; let lo = 0, hi = 255, acc = 0;
+  for (; lo < 255 && (acc += hist[lo]) < n * .003; lo++);
+  acc = 0; for (; hi > 0 && (acc += hist[hi]) < n * .05; hi--);
+  if (hi - lo < 90) lo = Math.max(0, hi - 160);
+  const k = 255 / Math.max(1, hi - lo);
+  for (let i = 0; i < p.length; i += 4){ const v = Math.max(0, Math.min(255, (p[i] - lo) * k)); p[i] = p[i + 1] = p[i + 2] = v; }
+  ctx.putImageData(d, 0, 0);
+}
+// Finds a white/silver card or paper lying on a darker/coloured background (desk, wood) → its box in image pixels
+async function findDocBox(file){
+  const bmp = await createImageBitmap(file), k = 320 / Math.max(bmp.width, bmp.height);
+  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d'); x.drawImage(bmp, 0, 0, w, h);
+  const d = x.getImageData(0, 0, w, h).data, m = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++){
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    m[i] = (mx > 165 && (mx - mn) / (mx + 1) < 0.2) ? 1 : 0;
+  }
+  const lab = new Int32Array(w * h); let best = null, id = 0;
+  for (let i = 0; i < w * h; i++){
+    if (!m[i] || lab[i]) continue;
+    id++; const st = [i]; lab[i] = id; let n = 0, x0 = w, y0 = h, x1 = 0, y1 = 0;
+    while (st.length){
+      const j = st.pop(), jx = j % w, jy = (j / w) | 0; n++;
+      if (jx < x0) x0 = jx; if (jx > x1) x1 = jx; if (jy < y0) y0 = jy; if (jy > y1) y1 = jy;
+      for (const q of [j - 1, j + 1, j - w, j + w]) if (q >= 0 && q < w * h && m[q] && !lab[q] && Math.abs((q % w) - jx) <= 1){ lab[q] = id; st.push(q); }
+    }
+    if (!best || n > best.n) best = { n, x0, y0, x1, y1 };
+  }
+  if (!best) return null;
+  const area = (best.x1 - best.x0 + 1) * (best.y1 - best.y0 + 1), frac = area / (w * h);
+  if (frac < 0.04 || frac > 0.8 || best.n / area < 0.5) return null;          // no clear card, or the paper already fills the photo
+  const pad = 0.02 * Math.max(w, h);
+  return { x:Math.max(0, (best.x0 - pad) / k), y:Math.max(0, (best.y0 - pad) / k),
+           w:Math.min(bmp.width, (best.x1 - best.x0 + 2 * pad) / k), h:Math.min(bmp.height, (best.y1 - best.y0 + 2 * pad) / k) };
+}
+async function prepRxImage(file, mode = 'A', box = null){
+  const bmp0 = await createImageBitmap(file);
+  let bmp = bmp0;
+  if (box){   // work on the card only, so its small print becomes big enough to read
+    const cc = document.createElement('canvas'); cc.width = Math.round(box.w); cc.height = Math.round(box.h);
+    cc.getContext('2d').drawImage(bmp0, box.x, box.y, box.w, box.h, 0, 0, cc.width, cc.height); bmp = cc;
+  }
+  if (mode === 'C' || mode === 'C2'){   // card modes: blur scaled to the print (kills glitter / paper grain), then contrast
+    const tw = mode === 'C' ? 1600 : 1200, th = Math.round(bmp.height * tw / bmp.width);
+    const c = document.createElement('canvas'); c.width = tw; c.height = th;
+    const x = c.getContext('2d'); x.filter = `grayscale(1) blur(${mode === 'C' ? 2.5 : 2}px)`; x.drawImage(bmp, 0, 0, tw, th);
+    stretch(x, tw, th);
+    if (mode === 'C') return c;
+    const c2 = document.createElement('canvas'); c2.width = tw * 2; c2.height = th * 2;
+    const x2 = c2.getContext('2d'); x2.imageSmoothingQuality = 'high'; x2.drawImage(c, 0, 0, c2.width, c2.height); return c2;
+  }
   const target = mode === 'A' ? 900 : 1800;
   const w1 = Math.min(target, mode === 'A' ? bmp.width : bmp.width * 2), h1 = Math.round(bmp.height * w1 / bmp.width);
   const c1 = document.createElement('canvas'); c1.width = w1; c1.height = h1;
   const x1 = c1.getContext('2d'); x1.filter = mode === 'A' ? 'grayscale(1) blur(1.2px)' : 'grayscale(1)'; x1.drawImage(bmp, 0, 0, w1, h1);
-  const d = x1.getImageData(0, 0, w1, h1), p = d.data, hist = new Uint32Array(256);
+  stretch(x1, w1, h1);
+  if (false){ const d = x1.getImageData(0, 0, w1, h1), p = d.data, hist = new Uint32Array(256);
   for (let i = 0; i < p.length; i += 4) hist[p[i]]++;
   const n = w1 * h1; let lo = 0, hi = 255, acc = 0;
   for (; lo < 255 && (acc += hist[lo]) < n * .003; lo++);          // darkest ink
@@ -1663,7 +1718,7 @@ async function prepRxImage(file, mode = 'A'){
   if (hi - lo < 90) lo = Math.max(0, hi - 160);                      // faint or almost-empty image: don't blow it out
   const k = 255 / Math.max(1, hi - lo);
   for (let i = 0; i < p.length; i += 4){ const v = Math.max(0, Math.min(255, (p[i] - lo) * k)); p[i] = p[i + 1] = p[i + 2] = v; }
-  x1.putImageData(d, 0, 0);
+  x1.putImageData(d, 0, 0); }
   if (mode !== 'A') return c1;
   const c2 = document.createElement('canvas'); c2.width = w1 * 2; c2.height = h1 * 2;
   const x2 = c2.getContext('2d'); x2.imageSmoothingQuality = 'high'; x2.drawImage(c1, 0, 0, c2.width, c2.height);
@@ -1733,7 +1788,7 @@ function parseRx(raw){
   const out = {};
 
   // header → column order
-  const COLS = [['SPH', /^(SPH|SPHERE|SPHERICAL|SPN|5PH)$/], ['CYL', /^(CYL|CYLINDER|CYLINDRICAL|CY1)$/], ['AX', /^(AXIS|AX|AXE|AXI5)$/],
+  const COLS = [['SPH', /^(SPH|SPHERE|SPHERICAL|SPN|5PH|SPHL|SEH|SPI)$/], ['CYL', /^(CYL|CYLINDER|CYLINDRICAL|CY1|CYT|CYI|CVL|CYE|GYL|OYL|CYLL)$/], ['AX', /^(AXIS|AX|AXE|AXI5)$/],
                 ['ADD', /^(ADD|ADO|AD)$/], ['PRISM', /^(PRISM|PR)$/], ['BASE', /^(BASE|BS)$/], ['SH', /^(SH|SEG|HT|FH)$/],
                 ['PD', /^(PD|P\.D\.?|PO|IPD|MPD)$/], ['VA', /^(VA|V\.A\.?|VISION)$/]];
   const colOf = w => (COLS.find(c => c[1].test(w)) || [null])[0];
@@ -1834,7 +1889,23 @@ function parseRx(raw){
   }
   return out;
 }
-window.__prepRx = prepRxImage; window.__parseRx = parseRx; window.__signs = rebuildWithSigns;
+// per-value majority across several reads (ties → first read)
+function voteRx(list){
+  const out = {};
+  for (const e of ['R', 'L']){
+    const have = list.filter(r => r[e]); if (!have.length) continue;
+    out[e] = {};
+    for (const f of ['sph', 'cyl', 'axis', 'pd']){
+      const cnt = new Map(); have.forEach(r => { const v = r[e][f]; if (v !== undefined) cnt.set(v, (cnt.get(v) || 0) + 1); });
+      let bv, bn = 0; for (const [v, n] of cnt) if (n > bn){ bv = v; bn = n; }
+      if (bn) out[e][f] = bv;
+    }
+  }
+  for (const f of ['pdR', 'pdL', 'pd']){ const v = list.map(r => r[f]).filter(x => x !== undefined); if (v.length) out[f] = v.sort((a, b) => v.filter(x => x === b).length - v.filter(x => x === a).length)[0]; }
+  return out;
+}
+window.__vote = voteRx;
+window.__prepRx = prepRxImage; window.__docBox = findDocBox; window.__parseRx = parseRx; window.__signs = rebuildWithSigns;
 /* Reading the Rx photo:
    1) Inside Claude (published page): the image is read by Claude itself via the `sample` capability (most accurate,
       handles handwriting / printed tables, numbers only).
@@ -1928,15 +1999,34 @@ async function runOCR(file){
       logger: m => { if (m.status === 'recognizing text') st.textContent = `🔎 جاري القراءة ${Math.round(m.progress * 100)}%`; }
     });
     await worker.setParameters({ tessedit_pageseg_mode:'6', preserve_interword_spaces:'1' });
-    const pass = async mode => {
-      const cv = await prepRxImage(file, mode);
+    const box = await findDocBox(file).catch(() => null);
+    const pass = async (mode, bx = null) => {
+      const cv = await prepRxImage(file, mode, bx);
       const { data } = await worker.recognize(cv, {}, { text:true, blocks:true });
       let t = data.text; try{ t = rebuildWithSigns(data, cv) || data.text; }catch(e){ console.error(e); }
       const rx = parseRx(t);
-      return { t, rx, score:(rx.R ? 1 : 0) + (rx.L ? 1 : 0) };
+      const val = e => e ? (e.sph ? 1 : 0) + (e.cyl ? 1 : 0) + (e.axis ? 1 : 0) : 0;
+      return { t, rx, score:(rx.R ? 10 : 0) + (rx.L ? 10 : 0) + val(rx.R) + val(rx.L) };
     };
-    let best = await pass('A');
-    if (best.score < 2){ st.textContent = '🔎 بجرب قراءة تانية أوضح…'; const b2 = await pass('B'); if (b2.score > best.score) best = b2; }
+    let best = null;
+    if (box){
+      // card / paper found: read it twice with different cleanups; if they disagree, a third read breaks the tie per value
+      const runs = [];
+      for (const [i, m] of [['C2', 'C2'], ['C', 'C'], ['A', 'A']].entries()){
+        if (i) st.textContent = `🔎 بتأكد من القراءة (${i + 1}/3)…`;
+        runs.push(await pass(m[1], m[0] === 'A' ? null : box));
+        if (i === 1 && JSON.stringify(runs[0].rx) === JSON.stringify(runs[1].rx)) break;
+      }
+      best = runs.reduce((a, b) => b.score > a.score ? b : a);
+      if (runs.length > 2) best = { ...best, rx:voteRx(runs.map(r => r.rx)) };
+    }
+    if (!best || best.score < 24){
+      for (const m of ['A', 'B']){
+        st.textContent = '🔎 بجرب قراءة تانية أوضح…';
+        const r = await pass(m); if (!best || r.score > best.score) best = r;
+        if (best.score >= 24) break;
+      }
+    }
     await worker.terminate();
     const text = best.t;
     $('ocrText').value = text; $('ocrText').style.display = 'block';
@@ -2158,7 +2248,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 29;
+const APP_V = 30;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
