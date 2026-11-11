@@ -1,0 +1,25 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.ihab.lenssim'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.ihab.lenssim'
+        minSdk 24
+        targetSdk 34
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger())
+        versionName "1.0." + (System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+    }
+    signingConfigs {
+        release {
+            storeFile file('ihab-release.jks')
+            storePassword 'ihab-lens-2026'
+            keyAlias 'ihab'
+            keyPassword 'ihab-lens-2026'
+        }
+    }
+    buildTypes {
+        release { minifyEnabled false; signingConfig signingConfigs.release }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'androidx.core:core:1.13.1' }

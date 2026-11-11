@@ -2067,6 +2067,7 @@ requestAnimationFrame(animate);
 // expose for debugging
 window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, get state(){ return state; }, get root(){ return root; }, get stats(){ return lastStats; } };
 </script>
+<script>if(/IHABApk/.test(navigator.userAgent)||/[?&]apk=1/.test(location.search)){const c=document.getElementById('cardBtn');if(c)c.style.display='none';}</script>
 <script>if('serviceWorker' in navigator) addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
 <!-- ===== Wheel picker: tap a value box → a drum of numbers; swipe up/down, the value applies as soon as it stops ===== -->
 <style>
