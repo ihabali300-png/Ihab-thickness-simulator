@@ -1692,7 +1692,7 @@ function rebuildWithSigns(data, canvas){
     lines.push(li.words.map(w => {
       let t = w.text.replace(/^[–—~“”"'`’‘_]/, '-');
       if (/^[+-]\d{3}$/.test(t) && +t.slice(1) % 25 === 0) t = t[0] + t[1] + '.' + t.slice(2);       // "+100" → "+1.00"
-      if (/^\d{1,2}[.,]\d{2}$/.test(t)){
+      if (/^\d{1,2}[.,]\d{2}$/.test(t) || (/^\d{3,4}$/.test(t) && +t % 25 === 0 && +t >= 100)){
         const s = signAt(w.bbox, prevX1);
         if (/^4\d[.,]\d{2}$/.test(t)) t = '+' + t.slice(1);                                          // "42.25" = "+2.25"
         else if (s) t = s + t;
@@ -1748,6 +1748,8 @@ function parseRx(raw){
     return t;
   };
   const sg = t => !t || t.v === 0 ? 0 : (t.s === '-' ? -t.v : t.v);
+  // OCR often drops the dot: "450" = 4.50, "-125" = -1.25 (quarter steps only)
+  const pw = t => (t && !t.dec && t.v >= 100 && t.v <= 2500 && t.v % 25 === 0) ? { ...t, v:t.v / 100, dec:true } : t;
 
   const readRow = (l) => {
     const cut = l.split(/\bADD\b|\bNEAR\b|\bREADING\b/)[0];
@@ -1758,8 +1760,8 @@ function parseRx(raw){
     if (header && t.length === header.length){
       header.forEach((c, i) => {
         const x = t[i]; if (!x) return;
-        if (c === 'SPH' && x.v <= 30) r.sph = sg(x);
-        else if (c === 'CYL' && x.v <= 10) r.cyl = sg(x);
+        if (c === 'SPH'){ const y = pw(x); if (y.v <= 30) r.sph = sg(y); }
+        else if (c === 'CYL'){ const y = pw(x); if (y.v <= 10) r.cyl = sg(y); }
         else if (c === 'AX' && x.v <= 180) r.axis = Math.round(x.v);
         else if (c === 'PD' && x.v >= 20 && x.v <= 80) r.pd = x.v;
       });
@@ -1768,6 +1770,8 @@ function parseRx(raw){
     // 2) explicit "x180" axis
     const ax = nums.find(x => x.x && x.v <= 180);
     const rest = nums.filter(x => x !== ax);
+    if (rest.length >= 2) rest[0] = pw(rest[0]);                                             // SPH position
+    if (rest.length >= 3 && !rest[2].dec && rest[2].v <= 180) rest[1] = pw(rest[1]);        // CYL position (an axis follows)
     let i = 0;
     if (rest[i] && rest[i].v <= 30 && (rest[i].dec || rest[i].v === 0)){ r.sph = sg(rest[i]); i++; }
     if (rest[i] && rest[i].v <= 10 && (rest[i].dec || rest[i].v === 0)){ r.cyl = sg(rest[i]); i++; }
@@ -2140,7 +2144,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 26;
+const APP_V = 27;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
