@@ -17,6 +17,23 @@ android {
             keyPassword 'ihab-lens-2026'
         }
     }
+    buildFeatures { buildConfig true }
+    flavorDimensions = ['edition']
+    productFlavors {
+        lite {   // for friends: simulator only (no fitting card → nothing goes to Ihab's sheet)
+            dimension 'edition'
+            buildConfigField 'String', 'UA_TAG', '"IHABApk"'
+            buildConfigField 'String', 'START', '"?apk=1"'
+            resValue 'string', 'app_name', 'IHAB LensForm 3D'
+        }
+        full {   // Ihab's own copy: simulator + fitting card
+            dimension 'edition'
+            applicationIdSuffix '.full'
+            buildConfigField 'String', 'UA_TAG', '"IHABApkFull"'
+            buildConfigField 'String', 'START', '"?apk=full"'
+            resValue 'string', 'app_name', 'IHAB LensForm 3D'
+        }
+    }
     buildTypes {
         release { minifyEnabled false; signingConfig signingConfigs.release }
     }

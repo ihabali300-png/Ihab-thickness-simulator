@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        s.setUserAgentString(s.getUserAgentString() + " IHABApk");
+        s.setUserAgentString(s.getUserAgentString() + " " + BuildConfig.UA_TAG);
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();
@@ -51,7 +51,7 @@ public class MainActivity extends Activity {
                     try {
                         File dir = new File(getCacheDir(), "photos"); dir.mkdirs();
                         File f = new File(dir, "shot_" + System.currentTimeMillis() + ".jpg");
-                        cameraUri = FileProvider.getUriForFile(MainActivity.this, "com.ihab.lenssim.files", f);
+                        cameraUri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".files", f);
                         intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
                         intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
                         intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -67,7 +67,7 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        if (saved != null) web.restoreState(saved); else web.loadUrl(HOME + "?apk=1");
+        if (saved != null) web.restoreState(saved); else web.loadUrl(HOME + BuildConfig.START);
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
