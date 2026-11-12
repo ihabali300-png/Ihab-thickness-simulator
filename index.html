@@ -1622,7 +1622,7 @@ function measureBridge(img, left, right){
   if (tops.length < 3) return { dbl:gap / lw };
   tops.sort((a, b) => a - b); bots.sort((a, b) => a - b);
   const t = tops[tops.length >> 1], b = bots[bots.length >> 1], h2 = lh / 2;
-  if (b - t < 0.04 * lh || b - t > 0.3 * lh || (cyR - t) / (lh / 2) > 1.25) return { dbl:gap / lw };   // a folded temple behind the bridge reads too tall → keep only the DBL
+  if (b - t < 0.04 * lh || b - t > 0.3 * lh || (cyR - t) / (lh / 2) > 1.25 || (cyR - t) / (lh / 2) < 0.45) return { dbl:gap / lw };   // a folded temple behind the bridge reads too tall → keep only the DBL
   return { dbl:gap / lw, top:(cyR - t) / h2, bot:(cyR - b) / h2 };
 }
 /* All lens openings in the photo, traced and grouped per frame: [{ tr, last, box, mirror }] — one entry per frame
@@ -1646,6 +1646,9 @@ function findFrames(img){
     .sort((a, b) => b.area - a.area).filter((l, i, arr) => !arr.slice(0, i).some(q => inside(l, q) || inside(q, l)));   // one lens = one entry
   // pair lenses of one frame: side by side, same height and size
   const cx = l => (l.box.x0 + l.box.x1) / 2, cy = l => (l.box.y0 + l.box.y1) / 2, hh = l => l.box.y1 - l.box.y0, ww = l => l.box.x1 - l.box.x0;
+  // the open space under a bridge (between two lenses at the same height) looks like a small lens → drop it
+  L = L.filter(g => !L.some(p => p !== g && cx(p) < cx(g) && Math.abs(cy(p) - cy(g)) < 0.5 * hh(p) && p.box.x1 > g.box.x0 - 0.02 &&
+                      L.some(q => q !== g && q !== p && cx(q) > cx(g) && Math.abs(cy(q) - cy(g)) < 0.5 * hh(q) && q.box.x0 < g.box.x1 + 0.02)));
   L.sort((a, b) => cy(a) - cy(b) || cx(a) - cx(b));
   const used = new Set(), frames = [];
   for (const a of L){
@@ -1653,7 +1656,7 @@ function findFrames(img){
     let mate = null, best = 1e9;
     for (const b of L){ if (used.has(b)) continue;
       const dx = Math.abs(cx(a) - cx(b)), dy = Math.abs(cy(a) - cy(b));
-      if (dy < 0.6 * Math.max(hh(a), hh(b)) && dx < 3.2 * Math.max(ww(a), ww(b)) && Math.abs(hh(a) - hh(b)) < 0.4 * Math.max(hh(a), hh(b)) && dx < best){ best = dx; mate = b; } }
+      if (dy < 0.6 * Math.max(hh(a), hh(b)) && dx < 3.2 * Math.max(ww(a), ww(b)) && Math.abs(hh(a) - hh(b)) < 0.4 * Math.max(hh(a), hh(b)) && Math.abs(ww(a) - ww(b)) < 0.5 * Math.max(ww(a), ww(b)) && dx > 0.6 * Math.max(ww(a), ww(b)) && dx < best){ best = dx; mate = b; } }
     if (mate) used.add(mate);
     const pair = mate ? [a, mate].sort((p, q) => cx(p) - cx(q)) : [a];
     const right = pair[pair.length - 1], left = pair.length > 1 ? pair[0] : null;
@@ -1662,7 +1665,7 @@ function findFrames(img){
     const mirror = pick === left || (!left && cx(a) < 0.5);   // a lone lens on the left half is most likely a left lens
     let bridge = null;
     if (left) try{ bridge = measureBridge(img, left, right); }catch(e){ console.error(e); }
-    frames.push({ ...pick, mirror, y:cy(pick), bridge });
+    frames.push({ ...pick, mirror, y:cy(pick), bridge, paired:!!left });
   }
   return frames.sort((a, b) => a.y - b.y).slice(0, 6);
 }
@@ -1679,12 +1682,12 @@ function chooseFrame(frames){
     const svg = f => { const P = f.pts; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const [x, y] of P){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
       const w = x1 - x0, h = y1 - y0, k = Math.min(36 / w, 24 / h), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
       return `<svg viewBox="-20 -14 40 28" width="44" height="31"><path d="${P.map((p, i) => (i ? 'L' : 'M') + ((p[0] - cx) * k).toFixed(1) + ' ' + (-(p[1] - cy) * k).toFixed(1)).join(' ')}Z" fill="rgba(163,230,53,.14)" stroke="#a3e635" stroke-width="1.6" stroke-linejoin="round"/></svg>`; };
-    sh.innerHTML = `<div style="color:#d9f99d;font-weight:700;font-size:15px;margin-bottom:10px">لقيت ${frames.length} فريم — عاوز أنهي شكل؟</div>
+    sh.innerHTML = `<div style="color:#d9f99d;font-weight:700;font-size:15px;margin-bottom:10px">${frames.length > 1 ? `لقيت ${frames.length} فريم — عاوز أنهي شكل؟` : 'ده الشكل اللي لقيته — صح؟'}</div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">${frames.map((f, i) => `<button data-i="${i}" style="position:relative;padding:6px 8px;border-radius:10px;border:1px solid #a3e635;background:#000;line-height:0">${svg(f)}<span style="position:absolute;top:2px;right:5px;font-size:10px;line-height:1;color:#a3e635aa">${i + 1}</span></button>`).join('')}</div>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
         <button data-m="1" style="padding:8px 14px;border-radius:8px;border:1px solid #a3e63588;background:#1f2937;color:#ecfccb;font-size:13px">✏️ أحدد بإيدي</button>
         <button data-x="1" style="padding:8px 14px;border-radius:8px;border:1px solid #555;background:#1f2937;color:#ecfccb;font-size:13px">✕ إلغاء</button></div>
-      ${frames.some(f => f.tr.quality < 0.95) ? `<div style="color:#fde68a;font-size:12px;margin-top:10px">${CLEAR_TIP}</div>` : ''}`;
+      ${frames.some(f => f.tr.quality < 0.95 || !f.paired) ? `<div style="color:#fde68a;font-size:12px;margin-top:10px">${CLEAR_TIP}</div>` : ''}`;
     ov.appendChild(sh); document.body.appendChild(ov);
     const close = v => { ov.remove(); resolve(v); };
     ov.addEventListener('click', e => { if (e.target === ov) close(null); });
@@ -1716,7 +1719,9 @@ async function traceFrame(file){
     let frames = [], pick = -1;
     try{ frames = findFrames(img).map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts, rim:f.mirror ? mirrorArr(f.tr.rim) : f.tr.rim })); }catch(e){ console.error(e); }
     if (frames.length){
-      pick = frames.length === 1 ? 0 : await chooseFrame(frames);
+      // one clear, paired frame → apply at once; a lone or doubtful find → ask (it may be the bridge gap or the shelf)
+      const sure = frames.length === 1 && (frames[0].paired || (frames[0].tr.quality >= 0.97 && frames[0].tr.aspect >= 1.0));
+      pick = sure ? 0 : await chooseFrame(frames);
       if (pick === null){ note.textContent = 'اتلغى الاختيار'; return; }
       if (pick !== 'manual'){
         const f = frames[pick];
@@ -2581,7 +2586,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 39;
+const APP_V = 40;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
