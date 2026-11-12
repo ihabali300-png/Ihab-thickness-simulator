@@ -1907,6 +1907,45 @@ async function reTrace(opts = {}){
   if (!P.box){ customBridge = best.bridge && best.bridge.top !== undefined ? best.bridge : null; if (best.bridge && best.bridge.dbl) state.DBL = snap(state.A * best.bridge.dbl, 0.5, 12, 26); }
   P.q = best.tr.quality; useTrace({ ...best.tr, pts, rim }, `تم ✓ اتقرا تاني بـ ${n} طرق (وضوح الحافة ${Math.round(best.tr.quality * 100)}%) — 100%`);
 }
+/* 🧠 On-device AI (SlimSAM): the classic trace gives the prompt (points inside the lens, points on the rim) and a
+   prior; the AI mask gives the exact lens opening. Loads once (~35 MB, then offline), falls back silently. */
+let aiMod = null, aiFailed = false;
+async function aiLoad(note){
+  if (aiFailed) return null;
+  try{
+    if (!aiMod) aiMod = await import('./ai/lens-ai.js');
+    if (!aiMod.aiReady()){ if (note) note.textContent = '🧠 بحمّل الذكاء الاصطناعي (مرة واحدة)…';
+      await aiMod.loadAI(p => { if (note) note.textContent = `🧠 بحمّل الذكاء الاصطناعي (مرة واحدة)… ${Math.round(p * 100)}%`; }); }
+    return aiMod;
+  }catch(e){ console.error(e); aiFailed = true; return null; }
+}
+async function aiRefine(img, f, note){
+  const A = await aiLoad(note); if (!A) return false;
+  if (note) note.textContent = '🧠 الذكاء الاصطناعي بيحدد العدسة…';
+  await new Promise(r => setTimeout(r, 30));
+  const cv = img.show || img.cv, W = img.cv.width, H = img.cv.height, L = f.last;
+  const abs = f.tr.pts.map(([x, y]) => [L.cx + x, L.cy - y]);
+  let cx = 0, cy = 0; abs.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= abs.length; cy /= abs.length;
+  const pos = [[cx / W, cy / H]], neg = [];
+  for (let i = 0; i < 8; i++){ const p = abs[Math.round(i * abs.length / 8) % abs.length]; pos.push([(cx + (p[0] - cx) * 0.55) / W, (cy + (p[1] - cy) * 0.55) / H]); }
+  for (let i = 0; i < 12; i++){ const p = abs[Math.round(i * abs.length / 12) % abs.length]; neg.push([(cx + (p[0] - cx) * 1.07) / W, (cy + (p[1] - cy) * 1.07) / H]); }
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; abs.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+  const box = { x0:x0 / W - 0.02, x1:x1 / W + 0.02, y0:y0 / H - 0.02, y1:y1 / H + 0.02 };
+  let r = null;
+  try{ r = await A.segmentLens(cv.width === W ? cv : img.cv, box, pos, neg, abs); }catch(e){ console.error(e); return false; }
+  if (!r || r.agree < 0.55 || r.score < 0.7) return false;
+  // back to the tracer frame (relative to the lens centre, y up), 180 points by angle like the classic trace
+  const P = []; for (let a = 0; a < 180; a++){ const q = r.pts[a * 2]; P.push([q[0] - L.cx, L.cy - q[1]]); }
+  f.tr = { ...f.tr, pts:P, quality:Math.max(f.tr.quality, 0.98), ai:true };
+  // preview with the AI outline
+  const pc = document.createElement('canvas'), pad = 1.5, sx = Math.max(0, L.cx - L.hw * pad), sy = Math.max(0, L.cy - L.hh * pad);
+  const sw = Math.min(W - sx, L.hw * 2 * pad), sh = Math.min(H - sy, L.hh * 2 * pad), sc = 300 / sw;
+  pc.width = 300; pc.height = Math.round(sh * sc); const g = pc.getContext('2d'); g.drawImage(cv, sx * cv.width / W, sy * cv.height / H, sw * cv.width / W, sh * cv.height / H, 0, 0, pc.width, pc.height);
+  g.strokeStyle = '#a3e635'; g.lineWidth = 3; g.beginPath(); r.pts.forEach(([x, y], i) => { const X = (x - sx) * sc, Y = (y - sy) * sc; i ? g.lineTo(X, Y) : g.moveTo(X, Y); }); g.closePath(); g.stroke();
+  g.fillStyle = '#000a'; g.fillRect(0, 0, 92, 20); g.fillStyle = '#d9f99d'; g.font = 'bold 12px sans-serif'; g.fillText('🧠 AI ✓', 6, 14);
+  f.tr.preview = pc.toDataURL('image/jpeg', 0.85);
+  return true;
+}
 async function traceFrame(file){
   if (!file) return;
   const note = $('shNote');
@@ -1927,14 +1966,16 @@ async function traceFrame(file){
       if (pick === null){ note.textContent = 'اتلغى الاختيار'; return; }
       if (pick !== 'manual'){
         const f = frames[pick];
+        const aiOk = await aiRefine(img, f, note);
+        if (aiOk){ f.pts = f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts; }
         lastTrace = { ...f.last, mirror:!!f.mirror }; customPreview = f.tr.preview;
         lastPhoto = { img, c:[(f.box.x0 + f.box.x1) / 2, (f.box.y0 + f.box.y1) / 2], q:f.tr.quality };
         customBridge = f.bridge && f.bridge.top !== undefined ? f.bridge : null;
         if (f.bridge && f.bridge.dbl) state.DBL = snap(state.A * f.bridge.dbl, 0.5, 12, 26);
-        useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع${f.tr.quality < 0.9 ? ' — ' + CLEAR_TIP : ''}` : null);
+        useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, aiOk ? `تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة — ظبّط A و B بمقاس الذراع` : frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع${f.tr.quality < 0.9 ? ' — ' + CLEAR_TIP : ''}` : null);
         if (state.frame === 'plastic' && !photoBridge()) $('shNote').textContent += ' — ' + BRIDGE_TIP;
         // not a crisp, paired read → read it again the deep way right away (9 developments + wider boxes, live %)
-        if (!(f.paired && f.tr.quality >= 0.97)){ renderShapes(); await reTrace({ auto:true }); }
+        if (!aiOk && !(f.paired && f.tr.quality >= 0.97)){ renderShapes(); await reTrace({ auto:true }); }
         return;
       }
     }
@@ -2884,7 +2925,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 61;
+const APP_V = 62;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
