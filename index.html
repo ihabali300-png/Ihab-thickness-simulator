@@ -1275,6 +1275,7 @@ function renderShapes(){
     row = `<div class="sh-row sh-photo">
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
+      ${lastPhoto && customPts ? `<button class="sh-edit" id="reTrace">🔄 إعادة القراءة</button>` : ''}
       ${customPts ? `<button class="sh ${state.shape === 'custom' ? 'on' : ''}" data-sh="custom" title="من صورة الفريم">${shapeIcon('custom')}</button>` : ''}
       <div class="sh-btns">
         <label class="sh-up">📷 كاميرا<input type="file" id="frameCam" accept="image/*" capture="environment"></label>
@@ -1288,6 +1289,7 @@ function renderShapes(){
   box.querySelectorAll('.sw-tab').forEach(b => b.addEventListener('click', () => { shTab = shTab === b.dataset.g ? '' : b.dataset.g; renderShapes(); }));
   box.querySelectorAll('.sh').forEach(b => b.addEventListener('click', () => { state.shape = b.dataset.sh; renderShapes(); requestRebuild(); armReminders(); }));   // new shape → check B and depth
   const et = $('editTrace'); if (et) et.addEventListener('click', openTraceEditor);
+  const rt = $('reTrace'); if (rt) rt.addEventListener('click', reTrace);
   ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
   $('shName').textContent = SHAPE_NAME[state.shape] || '';
 }
@@ -1820,6 +1822,63 @@ function useTrace(tr, note){
   $('shNote').textContent = note || `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
   if (tr.quality < 0.9) $('shNote').textContent += ' — ' + CLEAR_TIP;
 }
+/* 🔄 re-read the last photo: every development (exposure, contrast, B&W, colour, inverted) is traced again,
+   with a live %; the best trace of the same lens replaces the current shape. */
+let lastPhoto = null;
+const REREAD_FILTERS = ['none', 'saturate(3) contrast(1.8) brightness(0.75)', 'brightness(0.5) contrast(3)', 'grayscale(1) contrast(3.2) brightness(0.7)',
+  'contrast(2.4)', 'brightness(0.35) contrast(4)', 'grayscale(1) brightness(0.5) contrast(4.5)', 'saturate(4) brightness(0.6) contrast(2.6)', 'invert(1) grayscale(1) contrast(2.5)'];
+async function reTrace(){
+  if (!lastPhoto) return;
+  const btn = $('reTrace'), note = $('shNote'), P = lastPhoto, img = P.img, n = REREAD_FILTERS.length;
+  if (btn){ btn.disabled = true; btn.style.opacity = .75; }
+  const prog = i => { const t = `🔄 بعيد القراءة… ${Math.round(i / n * 100)}%`; if (btn) btn.textContent = t; if (note) note.textContent = t; };
+  let best = null, bs = -1; const cands = [];
+  for (let i = 0; i < n; i++){
+    prog(i); await new Promise(r => setTimeout(r, 30));
+    try{
+      const V = REREAD_FILTERS[i] === 'none' ? img : photoVariant(img, REREAD_FILTERS[i]);
+      if (P.box){
+        const tr = traceLens(V, P.box, { rimless:state.frame === 'rimless' }), sc = tr.quality + (tr.ep ? 0.05 : 0);
+        if (sc > bs){ bs = sc; best = { tr, last:lastTrace, mirror:false, bridge:null }; }
+      } else {
+        for (const f of findFramesOne(V)){
+          const c = [(f.box.x0 + f.box.x1) / 2, (f.box.y0 + f.box.y1) / 2], d = Math.hypot(c[0] - P.c[0], c[1] - P.c[1]);
+          if (d > 0.12) continue;                                   // same lens as before only
+          // clear frames: the found opening is often smaller than the lens (reflections cut it) → also trace in a
+          // wider box; a clean trace that encloses more of the lens wins (the rim is the outermost clean inner edge)
+          const cand = [f];
+          for (const g of [1.2, 1.4]){
+            const hw = (f.box.x1 - f.box.x0) / 2 * g, hh = (f.box.y1 - f.box.y0) / 2 * g, cx = (f.box.x0 + f.box.x1) / 2, cy = (f.box.y0 + f.box.y1) / 2;
+            const bx = { x0:Math.max(0, cx - hw), x1:Math.min(1, cx + hw), y0:Math.max(0, cy - hh), y1:Math.min(1, cy + hh) };
+            const tr = traceLens(V, bx, { side:f.mirror ? -1 : 1 }); cand.push({ ...f, box:bx, tr, last:lastTrace });
+          }
+          for (const q of cand){
+            if (q.tr.quality < 0.84) continue;
+            const PP = q.tr.pts; let A = 0; for (let k = 0; k < PP.length; k++){ const a = PP[k], e = PP[(k + 1) % PP.length]; A += a[0] * e[1] - e[0] * a[1]; }
+            q.area = Math.abs(A) / 2 / (img.cv.width * img.cv.height); cands.push({ q, d });
+          }
+        }
+      }
+    }catch(e){ console.error(e); }
+  }
+  if (!P.box && cands.length){
+    // pick: clean edge first, then the trace that covers the lens best (largest area, not beyond 1.6× the median)
+    // baseline = the shape on screen; a re-read only replaces it when it is as clean AND encloses clearly more of the
+    // lens (the old one cut a chord) without running out onto the face of the frame; otherwise the cleanest same-size read
+    const P0 = customPts || []; let A0 = 0; for (let k = 0; k < P0.length; k++){ const a = P0[k], e = P0[(k + 1) % P0.length]; A0 += a[0] * e[1] - e[0] * a[1]; }
+    A0 = Math.abs(A0) / 2 / (img.cv.width * img.cv.height); const q0 = P.q || 0.8;
+    for (const { q, d } of cands){
+      const r = A0 ? q.area / A0 : 1; if (r > 1.35 || r < 0.9) continue;
+      const sc = q.tr.quality + (q.paired ? 0.2 : 0) + (r > 1.06 && q.tr.quality >= q0 - 0.03 ? 0.25 + (r - 1) : 0) + (q.tr.ep ? 0.03 : 0) - d;
+      if (sc > bs){ bs = sc; best = q; } }
+  }
+  prog(n);
+  if (!best){ if (note) note.textContent = 'معرفتش أقرا الفريم تاني — ' + CLEAR_TIP; renderShapes(); return; }
+  const pts = best.mirror ? mirrorPts(best.tr.pts) : best.tr.pts, rim = best.mirror ? mirrorArr(best.tr.rim) : best.tr.rim;
+  lastTrace = { ...best.last, mirror:!!best.mirror }; customPreview = best.tr.preview;
+  if (!P.box){ customBridge = best.bridge && best.bridge.top !== undefined ? best.bridge : null; if (best.bridge && best.bridge.dbl) state.DBL = snap(state.A * best.bridge.dbl, 0.5, 12, 26); }
+  P.q = best.tr.quality; useTrace({ ...best.tr, pts, rim }, `تم ✓ اتقرا تاني بـ ${n} طرق (وضوح الحافة ${Math.round(best.tr.quality * 100)}%) — 100%`);
+}
 async function traceFrame(file){
   if (!file) return;
   const note = $('shNote');
@@ -1840,6 +1899,7 @@ async function traceFrame(file){
       if (pick !== 'manual'){
         const f = frames[pick];
         lastTrace = { ...f.last, mirror:!!f.mirror }; customPreview = f.tr.preview;
+        lastPhoto = { img, c:[(f.box.x0 + f.box.x1) / 2, (f.box.y0 + f.box.y1) / 2], q:f.tr.quality };
         customBridge = f.bridge && f.bridge.top !== undefined ? f.bridge : null;
         if (f.bridge && f.bridge.dbl) state.DBL = snap(state.A * f.bridge.dbl, 0.5, 12, 26);
         useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع${f.tr.quality < 0.9 ? ' — ' + CLEAR_TIP : ''}` : null);
@@ -1864,6 +1924,7 @@ async function traceFrame(file){
     if (!ok) throw new Error('bad box');
     note.textContent = '✏️ بتتبع حافة الإطار…';
     const tr = traceLens(img, { x0:+box.x0, y0:+box.y0, x1:+box.x1, y1:+box.y1 }, { rimless:state.frame === 'rimless' });
+    lastPhoto = { img, box:{ x0:+box.x0, y0:+box.y0, x1:+box.x1, y1:+box.y1 } };
     customPreview = tr.preview;
     const preset = SHAPE_NAME[box.shape] && box.shape !== 'custom' ? box.shape : null;
     const boxAspect = Math.abs(box.x1 - box.x0) * img.cv.width / (Math.abs(box.y1 - box.y0) * img.cv.height);
@@ -2695,7 +2756,7 @@ goView('iso', true);
 requestAnimationFrame(animate);
 
 // expose for debugging
-window.__trace = { loadImageData, traceLens, findFrames, findLensBoxes, get last(){ return lastTrace; } };
+window.__trace = { loadImageData, traceLens, findFrames, findLensBoxes, findFramesOne, photoVariant, REREAD_FILTERS, get last(){ return lastTrace; } };
 window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, get state(){ return state; }, get root(){ return root; }, get stats(){ return lastStats; } };
 </script>
 <script>if(/IHABApk(?!Full)/.test(navigator.userAgent)||/[?&]apk=1/.test(location.search)){const c=document.getElementById('cardBtn');if(c)c.style.display='none';}</script>
@@ -2703,7 +2764,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 52;
+const APP_V = 53;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
