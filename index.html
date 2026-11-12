@@ -1264,76 +1264,96 @@ function traceLens(img, box, opts = {}){
   wx.fillStyle = '#808080'; wx.fillRect(0, 0, cw, ch);
   wx.filter = 'blur(1.1px)'; wx.drawImage(cv, sx, sy, bhw * 2 * pad, bhh * 2 * pad, 0, 0, cw, ch); wx.filter = 'none';
   const d = wx.getImageData(0, 0, cw, ch).data, n = cw * ch;
-  const GX = new Float32Array(n), GY = new Float32Array(n);
+  const GX = new Float32Array(n), GY = new Float32Array(n), LX = new Float32Array(n), LY = new Float32Array(n);
   for (let y = 1; y < ch - 1; y++) for (let x = 1; x < cw - 1; x++){
-    let bx = 0, by = 0, bm = -1;
+    let bx = 0, by = 0, bm = -1, lx = 0, ly = 0;
     for (let c = 0; c < 3; c++){
       const P = (xx, yy) => d[((yy) * cw + xx) * 4 + c];
       const gx = (P(x + 1, y - 1) + 2 * P(x + 1, y) + P(x + 1, y + 1)) - (P(x - 1, y - 1) + 2 * P(x - 1, y) + P(x - 1, y + 1));
       const gy = (P(x - 1, y + 1) + 2 * P(x, y + 1) + P(x + 1, y + 1)) - (P(x - 1, y - 1) + 2 * P(x, y - 1) + P(x + 1, y - 1));
-      const m = gx * gx + gy * gy; if (m > bm){ bm = m; bx = gx; by = gy; }
+      lx += gx; ly += gy; const m = gx * gx + gy * gy; if (m > bm){ bm = m; bx = gx; by = gy; }
     }
-    GX[y * cw + x] = bx; GY[y * cw + x] = by;
+    GX[y * cw + x] = bx; GY[y * cw + x] = by; LX[y * cw + x] = lx; LY[y * cw + x] = ly;
   }
   const cx = bhw * pad * k, cy = bhh * pad * k, hw = bhw * k, hh = bhh * k;
   // ---- 2) polar unwrap with a super-ellipse prior (closer to lens shapes than an ellipse)
-  const NA = 360, NR = 150, F0 = 0.55, F1 = 1.32, sup = 2.6;
+  const NA = 360, NR = 150, sup = 2.6;
   const prior = t => { const c = Math.abs(Math.cos(t)) / hw, s = Math.abs(Math.sin(t)) / hh; return 1 / Math.pow(c ** sup + s ** sup, 1 / sup); };
-  const E = new Float32Array(NA), S = new Float32Array(NA * NR), TG = new Float32Array(NA * NR), all = [];
-  const bil = (A, x, y) => { const x0 = Math.floor(x), y0 = Math.floor(y); if (x0 < 1 || y0 < 1 || x0 >= cw - 2 || y0 >= ch - 2) return 0;
-    const fx = x - x0, fy = y - y0, i = y0 * cw + x0; return (A[i] * (1 - fx) + A[i + 1] * fx) * (1 - fy) + (A[i + cw] * (1 - fx) + A[i + cw + 1] * fx) * fy; };
-  for (let a = 0; a < NA; a++){
-    const t = a / NA * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t); E[a] = prior(t);
-    for (let j = 0; j < NR; j++){
-      const f = F0 + (F1 - F0) * j / (NR - 1), r = f * E[a], x = cx + ux * r, y = cy + uy * r;
-      const gx = bil(GX, x, y), gy = bil(GY, x, y), g = Math.abs(gx * ux + gy * uy);
-      S[a * NR + j] = g; TG[a * NR + j] = Math.abs(-gx * uy + gy * ux); if (j % 3 === 0) all.push(g);
+  let normFix = 0; const POL = opts.pol ?? 0.55;
+  const polarPass = (E, F0, F1, pass) => {
+    const S = new Float32Array(NA * NR), TG = new Float32Array(NA * NR), all = [];
+    const bil = (A, x, y) => { const x0 = Math.floor(x), y0 = Math.floor(y); if (x0 < 1 || y0 < 1 || x0 >= cw - 2 || y0 >= ch - 2) return 0;
+      const fx = x - x0, fy = y - y0, i = y0 * cw + x0; return (A[i] * (1 - fx) + A[i + 1] * fx) * (1 - fy) + (A[i + cw] * (1 - fx) + A[i + cw + 1] * fx) * fy; };
+    for (let a = 0; a < NA; a++){
+      const t = a / NA * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t); 
+      for (let j = 0; j < NR; j++){
+        const f = F0 + (F1 - F0) * j / (NR - 1), r = f * E[a], x = cx + ux * r, y = cy + uy * r;
+        const gx = bil(GX, x, y), gy = bil(GY, x, y);
+        // polarity: a rim is darker than the lens view inside and the shelf/wall outside, so its INNER edge darkens
+        // outward; edges that brighten outward (outer rim silhouette, shelf line) count less
+        const sg = bil(LX, x, y) * ux + bil(LY, x, y) * uy, g = Math.abs(gx * ux + gy * uy) * (!rimless && sg > 0 ? POL : 1);
+        S[a * NR + j] = g; TG[a * NR + j] = Math.abs(-gx * uy + gy * ux); if (j % 3 === 0) all.push(g);
+      }
     }
-  }
-  all.sort((p, q) => p - q);
-  const norm = all[Math.floor(all.length * 0.985)] || 1;
-  // printed text / logos / scratches: lots of edge energy ACROSS the ray around the spot → penalise
-  { const RA = new Float32Array(NA * NR);
-    for (let a = 0; a < NA; a++) for (let j = 0; j < NR; j++){ let rs = 0, ts = 0;
-      for (let da = -3; da <= 3; da++){ const aa = (a + da + NA) % NA; for (let dj = -4; dj <= 4; dj++){ const jj = j + dj; if (jj < 0 || jj >= NR) continue; rs += S[aa * NR + jj]; ts += TG[aa * NR + jj]; } }
-      RA[a * NR + j] = Math.max(0, ts - 0.9 * rs) / 63; }
-    for (let i = 0; i < NA * NR; i++) S[i] = Math.max(0, S[i] - 1.6 * RA[i]); }
-  const df = (F1 - F0) / (NR - 1), back = Math.max(2, Math.round(0.09 / df));
-  for (let a = 0; a < NA; a++){
-    const row = a * NR; let run = 0; const tmp = new Float32Array(NR);
-    for (let j = 0; j < NR; j++){
-      const f = F0 + (F1 - F0) * j / (NR - 1);
-      const v = rimless ? Math.min(0.32, S[row + j] / norm) + 0.22 * (f - F0)   // faint drilled edge: cap strong prints, prefer the outer edge
-                        : Math.min(1.25, S[row + j] / norm);
-      let prevMax = 0; for (let q = Math.max(0, j - back); q < j; q++) prevMax = Math.max(prevMax, tmp[q]);
-      tmp[j] = v;
-      S[row + j] = rimless ? v : v - 0.55 * Math.max(0, prevMax - 0.15);   // rimmed: damp the outer edge of the same rim
+    all.sort((p, q) => p - q);
+    const norm = normFix || (normFix = all[Math.floor(all.length * 0.985)] || 1);
+    // printed text / logos / scratches: lots of edge energy ACROSS the ray around the spot → penalise
+    { const RA = new Float32Array(NA * NR);
+      for (let a = 0; a < NA; a++) for (let j = 0; j < NR; j++){ let rs = 0, ts = 0;
+        for (let da = -3; da <= 3; da++){ const aa = (a + da + NA) % NA; for (let dj = -4; dj <= 4; dj++){ const jj = j + dj; if (jj < 0 || jj >= NR) continue; rs += S[aa * NR + jj]; ts += TG[aa * NR + jj]; } }
+        RA[a * NR + j] = Math.max(0, ts - 0.9 * rs) / 63; }
+      for (let i = 0; i < NA * NR; i++) S[i] = Math.max(0, S[i] - 1.6 * RA[i]); }
+    const df = (F1 - F0) / (NR - 1), back = Math.max(2, Math.round(0.09 / df));
+    for (let a = 0; a < NA; a++){
+      const row = a * NR; let run = 0; const tmp = new Float32Array(NR);
+      for (let j = 0; j < NR; j++){
+        const f = F0 + (F1 - F0) * j / (NR - 1);
+        const v = rimless ? Math.min(0.32, S[row + j] / norm) + 0.22 * (f - F0)   // faint drilled edge: cap strong prints, prefer the outer edge
+                          : Math.min(1.25, S[row + j] / norm);
+        let prevMax = 0; for (let q = Math.max(0, j - back); q < j; q++) prevMax = Math.max(prevMax, tmp[q]);
+        tmp[j] = v;
+        S[row + j] = rimless ? v : v - 0.55 * Math.max(0, prevMax - 0.15);   // rimmed: damp the outer edge of the same rim
+      }
     }
-  }
-  // ---- 3) closed-path dynamic programming (two laps, keep the second)
-  const DJ = 3, LAM = 0.045, laps = 2, T = NA * laps;
-  let prev = new Float32Array(NR), cur = new Float32Array(NR);
-  const back2 = new Int16Array(T * NR);
-  for (let j = 0; j < NR; j++) prev[j] = S[j];
-  for (let s = 1; s < T; s++){
-    const row = (s % NA) * NR;
-    for (let j = 0; j < NR; j++){
-      let best = -1e9, bj = j;
-      for (let dj = -DJ; dj <= DJ; dj++){ const q = j + dj; if (q < 0 || q >= NR) continue;
-        const v = prev[q] - LAM * Math.abs(dj); if (v > best){ best = v; bj = q; } }
-      cur[j] = best + S[row + j]; back2[s * NR + j] = bj;
+    // ---- 3) closed-path dynamic programming (two laps, keep the second)
+    //  state = (radius bin, last step) → penalises both jumping (LAM) and sudden bends (MU): a real rim bends smoothly,
+    //  a hop to the endpiece / shelf / nose-pad shadow and back needs two sharp bends, so it no longer pays off
+    const DJ = 3, ND = 2 * DJ + 1, LAM = 0.04, MU = opts.mu ?? 0.07, laps = 2, T = NA * laps;
+    if (!rimless && pass === 1) for (let a = 0; a < NA; a++) for (let j = 0; j < NR; j++){ const f = F0 + (F1 - F0) * j / (NR - 1); if (f > 1.1) S[a * NR + j] -= 0.9 * (f - 1.1); }
+    let prev = new Float32Array(NR * ND), cur = new Float32Array(NR * ND);
+    const back2 = new Int8Array(T * NR * ND);
+    for (let j = 0; j < NR; j++) for (let d = 0; d < ND; d++) prev[j * ND + d] = S[j];
+    for (let s = 1; s < T; s++){
+      const row = (s % NA) * NR;
+      for (let j = 0; j < NR; j++) for (let d = 0; d < ND; d++){
+        const q = j - (d - DJ); if (q < 0 || q >= NR){ cur[j * ND + d] = -1e9; continue; }
+        let best = -1e9, bd = DJ; const base = q * ND;
+        for (let e = 0; e < ND; e++){ const v = prev[base + e] - MU * Math.abs(e - d); if (v > best){ best = v; bd = e; } }
+        cur[j * ND + d] = best - LAM * Math.abs(d - DJ) + S[row + j]; back2[(s * NR + j) * ND + d] = bd;
+      }
+      [prev, cur] = [cur, prev];
     }
-    [prev, cur] = [cur, prev];
-  }
-  let jEnd = 0; for (let j = 1; j < NR; j++) if (prev[j] > prev[jEnd]) jEnd = j;
-  const path = new Int16Array(T); path[T - 1] = jEnd;
-  for (let s = T - 1; s > 0; s--) path[s - 1] = back2[s * NR + path[s]];
-  const fr = new Float32Array(NA); let good = 0, sum = 0;
-  for (let a = 0; a < NA; a++){ const j = path[NA + a] ?? path[a]; fr[a] = F0 + (F1 - F0) * j / (NR - 1); const v = S[a * NR + j]; sum += v; if (v > (rimless ? 0.24 : 0.18)) good++; }
+    let jEnd = 0, dEnd = DJ; for (let j = 0; j < NR; j++) for (let d = 0; d < ND; d++) if (prev[j * ND + d] > prev[jEnd * ND + dEnd]){ jEnd = j; dEnd = d; }
+    const path = new Int16Array(T); path[T - 1] = jEnd;
+    { let j = jEnd, d = dEnd; for (let s = T - 1; s > 0; s--){ const e = back2[(s * NR + j) * ND + d]; j = j - (d - DJ); d = e; path[s - 1] = j; } }
+    if (opts.debug) (opts.debug.S = Array.from(S)), opts.debug.path = Array.from(path.slice(NA)), opts.debug.NR = NR;
+    const fr = new Float32Array(NA); let good = 0, sum = 0;
+    for (let a = 0; a < NA; a++){ const j = path[NA + a] ?? path[a]; fr[a] = F0 + (F1 - F0) * j / (NR - 1); const v = S[a * NR + j]; sum += v; if (v > (rimless ? 0.24 : 0.18)) good++; }
+    return { fr, good };
+  };
+  // pass 1: super-ellipse prior from the box; pass 2: re-unwrap around the (smoothed) pass-1 outline in a narrow band,
+  // so the rim runs almost flat in polar space — steep spots (round lens in a square box) no longer force a chord
+  const E1 = new Float32Array(NA); for (let a = 0; a < NA; a++) E1[a] = prior(a / NA * Math.PI * 2);
+  const p1 = polarPass(E1, 0.55, 1.32, 1);
+  const E = new Float32Array(NA);
+  { const r1 = Array.from(p1.fr, (f, a) => f * E1[a]); for (let a = 0; a < NA; a++){ const w = []; for (let q = -9; q <= 9; q++) w.push(r1[(a + q + NA) % NA]); w.sort((p, q) => p - q); E[a] = w[9]; }
+    const E2 = E.slice(); for (let a = 0; a < NA; a++){ let m = 0; for (let q = -4; q <= 4; q++) m += E2[(a + q + NA) % NA]; E[a] = m / 9; } }
+  const { fr, good } = opts.onePass ? (E.set(E1), p1) : polarPass(E, 0.84, 1.16, 2);
   // tiny circular median to kill 1–2° spikes
   const med = new Float32Array(NA);
   for (let a = 0; a < NA; a++){ const w = []; for (let q = -2; q <= 2; q++) w.push(fr[(a + q + NA) % NA]); w.sort((p, q) => p - q); med[a] = w[2]; }
   let P = []; for (let a = 0; a < NA; a++){ const t = a / NA * Math.PI * 2, r = med[a] * E[a]; P.push([Math.cos(t) * r, Math.sin(t) * r]); }
+  const RAW = P.map(([x, y]) => [x / k, y / k]);
   const scale = (hw + hh) / 2;
   // ---- 4) shape model
   const area = Q => { let A = 0; for (let i = 0; i < Q.length; i++){ const p = Q[i], q = Q[(i + 1) % Q.length]; A += p[0] * q[1] - q[0] * p[1]; } return Math.abs(A) / 2; };
@@ -1405,7 +1425,7 @@ function traceLens(img, box, opts = {}){
   pc.closePath(); pc.stroke();
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-  lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh };
+  lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh, raw:RAW };
   return { pts, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
 }
 
@@ -2268,7 +2288,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 31;
+const APP_V = 32;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
