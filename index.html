@@ -936,7 +936,7 @@ function buildEye(eye){
     if (yT - yB > 1.2 && ext > 0.6){
       let iT0 = 0, bx = -Infinity; for (let i = 0; i < N; i++) if (C[i].y <= yT && C[i].y >= yB && C[i].x * sgnT > bx){ bx = C[i].x * sgnT; iT0 = i; }
       // rounded block, same depth and edge chamfer as the rim; starts inside the rim so the seam is hidden
-      const x0 = bx + rimMM * 0.15, x1 = bx + rimMM + ext, zF = zf[iT0], zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
+      const x0 = bx + rimMM * 0.05, x1 = bx + rimMM + ext, zF = zf[iT0] - 1.0, /* 1 mm behind the rim face → looks welded on */ zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
       const D = Math.max(1.2, zF - zB0), hgt = yT - yB, len = x1 - x0;
       const r = Math.min(hgt / 2, len) * 0.55, rIn = Math.min(hgt / 2, 1.5);   // big round on the temple end, small on the rim side
       const sh = new THREE.Shape(), X = v => sgnT * v;
@@ -1268,7 +1268,7 @@ function renderShapes(){
   }
   box.innerHTML = `<div class="sw-tabs">${groups.map(([g, l]) => `<button class="sw-tab ${g === shTab ? 'on' : ''}" data-g="${g}">${l}</button>`).join('')}</div>${row}`;
   box.querySelectorAll('.sw-tab').forEach(b => b.addEventListener('click', () => { shTab = shTab === b.dataset.g ? '' : b.dataset.g; renderShapes(); }));
-  box.querySelectorAll('.sh').forEach(b => b.addEventListener('click', () => { state.shape = b.dataset.sh; renderShapes(); requestRebuild(); }));
+  box.querySelectorAll('.sh').forEach(b => b.addEventListener('click', () => { state.shape = b.dataset.sh; renderShapes(); requestRebuild(); armReminders(); }));   // new shape → check B and depth
   const et = $('editTrace'); if (et) et.addEventListener('click', openTraceEditor);
   ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
   $('shName').textContent = SHAPE_NAME[state.shape] || '';
@@ -1768,6 +1768,7 @@ function chooseFrame(frames){
 const mirrorPts = P => { const M = P.length; return P.map((_, m) => { const q = P[(M / 2 - m + M) % M]; return [-q[0], q[1]]; }); };
 const mirrorArr = A => A && A.map((_, m) => A[(A.length / 2 - m + A.length) % A.length]);
 function useTrace(tr, note){
+  setTimeout(armReminders, 0);
   customPts = tr.pts; customRim = tr.rim || null; customEP = tr.ep || null; state.shape = 'custom';
   if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
   syncUI(); requestRebuild(); renderShapes();
@@ -1827,6 +1828,7 @@ async function traceFrame(file){
     } else {
       // edge not clear enough (rimless / clear acetate / angled photo) → closest preset with the photo's proportions
       if (preset) state.shape = preset;
+      armReminders();
       if (boxAspect > 0.9 && boxAspect < 2.4) state.B = snap(state.A / boxAspect, 0.5, 26, 50);
       syncUI(); requestRebuild(); renderShapes();
       $('shNote').textContent = preset
@@ -2656,7 +2658,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 46;
+const APP_V = 47;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
