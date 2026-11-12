@@ -408,7 +408,7 @@
       </div>
       <div class="np" id="trNp"><span>عدد النقط</span><button data-n="16">16</button><button data-n="24">24</button><button data-n="32">32</button><button data-n="40">40</button><button data-n="48">48</button></div>
       <div class="rd" id="trRdRow"><span>زوايا مدوّرة</span><input type="range" id="trRd" min="0" max="45" step="1" value="12"><span>زوايا حادة</span></div>
-      <div class="zm"><button id="trZo">－</button><button id="trZf">⤢</button><button id="trZi">＋</button></div>
+      <div class="zm"><button id="trZo">－</button><button id="trZf">⤢</button><button id="trZi">＋</button><button id="trSnap" style="width:auto;padding:0 12px;background:#1a2e05;color:#d9f99d;border-color:#a3e635">✨ ظبّط ذكي</button></div>
       <canvas id="trCv"></canvas>
       <div class="bt"><button class="no" id="trNo">إلغاء</button><button class="ok" id="trOk">تم ✓ طبّق الشكل</button></div>
     </div>
@@ -2792,6 +2792,40 @@ $('trZi').addEventListener('click', () => trZoom(1.3, trView.cssW / 2, trView.cs
 $('trZo').addEventListener('click', () => trZoom(1 / 1.3, trView.cssW / 2, trView.cssH / 2));
 $('trZf').addEventListener('click', () => { Object.assign(trView, trView.home); trView.k = trView.cssW / trView.sw; drawTrace(); });
 $('trM0').addEventListener('click', () => trSetMode('auto'));
+/* ✨ smart tidy: starts from YOUR points, pulls the outline onto the nearest real lens edge in the photo
+   (a few px either side, inner rim edge preferred), irons out jumps, then lays the points evenly and marks the
+   corners again → a clean shape that still follows what you set. Can be pressed again after more edits. */
+$('trSnap').addEventListener('click', () => {
+  const cv = lastTrace.cv, W = cv.width, H = cv.height;
+  const D = (trSnap.d && trSnap.cv === cv) ? trSnap.d : (trSnap.cv = cv, trSnap.d = cv.getContext('2d', { willReadFrequently:true }).getImageData(0, 0, W, H).data);
+  const px = (x, y) => { x = Math.max(0, Math.min(W - 1, Math.round(x))); y = Math.max(0, Math.min(H - 1, Math.round(y))); const i = (y * W + x) * 4; return [D[i], D[i + 1], D[i + 2]]; };
+  const O0 = trOutline(trHandles), M = 160, O = [];
+  { const L = [0]; for (let i = 1; i <= O0.length; i++){ const a = O0[i - 1], b = O0[i % O0.length]; L.push(L[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+    const tot = L[L.length - 1]; let j = 0; for (let k = 0; k < M; k++){ const d = k * tot / M; while (j < O0.length - 1 && L[j + 1] < d) j++;
+      const a = O0[j], b = O0[(j + 1) % O0.length], t = (d - L[j]) / ((L[j + 1] - L[j]) || 1); O.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); } }
+  let cx = 0, cy = 0, x0 = 1e9, x1 = -1e9; O.forEach(p => { cx += p[0]; cy += p[1]; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); }); cx /= M; cy /= M;
+  const Rw = Math.max(3, (x1 - x0) * 0.035), off = new Float32Array(M);
+  for (let i = 0; i < M; i++){
+    const a = O[(i - 1 + M) % M], b = O[(i + 1) % M], p = O[i]; let nx = b[1] - a[1], ny = -(b[0] - a[0]); const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+    if ((p[0] - cx) * nx + (p[1] - cy) * ny < 0){ nx = -nx; ny = -ny; }   // outward
+    let best = 0, bs = 0;
+    for (let t = -Rw; t <= Rw; t += 0.5){
+      const A = px(p[0] + nx * (t - 1), p[1] + ny * (t - 1)), B = px(p[0] + nx * (t + 1), p[1] + ny * (t + 1));
+      let g = 0, sg = 0; for (let c = 0; c < 3; c++){ const d = B[c] - A[c]; if (Math.abs(d) > Math.abs(g)) g = d; sg += d; }
+      const sc = Math.abs(g) * (sg < 0 ? 1.3 : 1) * (1 - 0.35 * Math.abs(t) / Rw);   // darker outward = inner rim edge
+      if (sc > bs){ bs = sc; best = t; }
+    }
+    off[i] = bs > 18 ? best : 0;
+  }
+  // iron out: median then mean over neighbours (no single-point jumps)
+  const med = Array.from(off, (_, i) => { const w = []; for (let q = -3; q <= 3; q++) w.push(off[(i + q + M) % M]); w.sort((p, q) => p - q); return w[3]; });
+  const sm = med.map((_, i) => { let s2 = 0; for (let q = -2; q <= 2; q++) s2 += med[(i + q + M) % M]; return s2 / 5; });
+  const S = O.map((p, i) => { const a = O[(i - 1 + M) % M], b = O[(i + 1) % M]; let nx = b[1] - a[1], ny = -(b[0] - a[0]); const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
+    if ((p[0] - cx) * nx + (p[1] - cy) * ny < 0){ nx = -nx; ny = -ny; } return [p[0] + nx * sm[i], p[1] + ny * sm[i]]; });
+  trHandles = S; const km = trMode, kr = trRound; trMode = 'corner'; trRound = 0; trResample(trN); trMode = km; trRound = kr;
+  drawTrace();
+});
+const trSnap = {};
 document.querySelectorAll('#trNp button').forEach(b => b.addEventListener('click', () => trSetN(+b.dataset.n)));
 $('trM1').addEventListener('click', () => trSetMode('corner'));
 $('trM2').addEventListener('click', () => trSetMode('curve'));
@@ -2846,7 +2880,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 58;
+const APP_V = 59;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
