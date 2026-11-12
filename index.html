@@ -1511,7 +1511,7 @@ function traceLens(img, box, opts = {}){
       return Math.max(0, best - L0) / W0;
     });
     const sr = rim.slice().sort((p, q) => p - q), m = sr[sr.length >> 1];
-    if (!(m > 0.015 && m < 0.2)) rim = null;                     // no believable face edge → keep the standard rim
+    if (!(m > 0.015 && m < 0.16)) rim = null;                     // no believable face edge → keep the standard rim
     else {
       // endpiece (the block on the temple side the hinge sits on): walk outward row by row from the inner rim on the
       // temple side (+x, or −x for a left lens: opts.side = −1) while the pixels are frame-coloured (not background).
@@ -1559,7 +1559,8 @@ function traceLens(img, box, opts = {}){
           }
         }
       }
-      rim = rim.map(w => Math.min(m * 1.9, Math.max(m * 0.55, w)));
+      // rims are near-uniform: only a modest variation is believed (a far edge above = brow bar / shelf, not rim)
+      rim = rim.map(w => Math.min(m * 1.35, Math.max(m * 0.7, w)));
       const M = rim.length, H = 4, re = [], im = [];
       for (let h = 0; h <= H; h++){ let c = 0, d = 0; for (let i = 0; i < M; i++){ const t = 2 * Math.PI * h * i / M; c += rim[i] * Math.cos(t); d += rim[i] * Math.sin(t); } re.push(c / M); im.push(d / M); }
       rim = rim.map((_, i) => { let v = re[0]; for (let h = 1; h <= H; h++){ const t = 2 * Math.PI * h * i / M; v += 2 * (re[h] * Math.cos(t) + im[h] * Math.sin(t)); } return Math.max(m * 0.55, v); });
@@ -2883,7 +2884,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 60;
+const APP_V = 61;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
