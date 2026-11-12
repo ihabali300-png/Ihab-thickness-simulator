@@ -1791,7 +1791,7 @@ function findFramesOne(img){
    tap = apply and close. Resolves to the index, 'manual' (draw the box by hand) or null. */
 const BRIDGE_TIP = '🌉 البردج متقاسش — افتح دراعات الفريم وصوّره من قدام تاني';
 const CLEAR_TIP = '💡 لو الفريم شفاف صوّره على خلفية غامقة (ورقة أو قماشة سودا) عشان الحافة تبان';
-function chooseFrame(frames){
+function chooseFrame(frames, title){
   return new Promise(resolve => {
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000b;display:flex;align-items:flex-end;justify-content:center';
@@ -1800,7 +1800,7 @@ function chooseFrame(frames){
     const svg = f => { const P = f.pts; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const [x, y] of P){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
       const w = x1 - x0, h = y1 - y0, k = Math.min(36 / w, 24 / h), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
       return `<svg viewBox="-20 -14 40 28" width="44" height="31"><path d="${P.map((p, i) => (i ? 'L' : 'M') + ((p[0] - cx) * k).toFixed(1) + ' ' + (-(p[1] - cy) * k).toFixed(1)).join(' ')}Z" fill="rgba(163,230,53,.14)" stroke="#a3e635" stroke-width="1.6" stroke-linejoin="round"/></svg>`; };
-    sh.innerHTML = `<div style="color:#d9f99d;font-weight:700;font-size:15px;margin-bottom:10px">${frames.length > 1 ? `لقيت ${frames.length} فريم — عاوز أنهي شكل؟` : 'ده الشكل اللي لقيته — صح؟'}</div>
+    sh.innerHTML = `<div style="color:#d9f99d;font-weight:700;font-size:15px;margin-bottom:10px">${title || (frames.length > 1 ? `لقيت ${frames.length} فريم — عاوز أنهي شكل؟` : 'ده الشكل اللي لقيته — صح؟')}</div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">${frames.map((f, i) => `<button data-i="${i}" style="position:relative;padding:6px 8px;border-radius:10px;border:1px solid #a3e635;background:#000;line-height:0">${svg(f)}<span style="position:absolute;top:2px;right:5px;font-size:10px;line-height:1;color:#a3e635aa">${i + 1}</span></button>`).join('')}</div>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
         <button data-m="1" style="padding:8px 14px;border-radius:8px;border:1px solid #a3e63588;background:#1f2937;color:#ecfccb;font-size:13px">✏️ أحدد بإيدي</button>
@@ -1876,6 +1876,22 @@ async function reTrace(){
       if (sc > bs){ bs = sc; best = q; } }
   }
   prog(n);
+  // different-looking reads → let the user pick (thumbnails like the frame chooser); the current shape is option 1
+  if (!P.box && cands.length){
+    const sig = pts => { let mx = 0, my = 0, x0 = 1e9, x1 = -1e9; pts.forEach(p => { mx += p[0]; my += p[1]; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); }); mx /= pts.length; my /= pts.length;
+      const w = (x1 - x0) / 2 || 1, r = []; for (let k = 0; k < 36; k++){ const t = k / 36 * Math.PI * 2; let bd = 9, br = 0;
+        pts.forEach(p => { const a = Math.atan2(p[1] - my, p[0] - mx), d = Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))); if (d < bd){ bd = d; br = Math.hypot(p[0] - mx, p[1] - my) / w; } }); r.push(br); } return r; };
+    const diff = (a, b) => a.reduce((s2, v, i) => s2 + Math.abs(v - b[i]), 0) / a.length;
+    const cur = { tr:{ pts:customPts, quality:P.q || 0.8, preview:customPreview }, cur:true }, picks = [cur], sigs = [sig(customPts)];
+    cands.sort((x, y) => (y.q.tr.quality + 0.3 * Math.min(1.4, y.q.area)) - (x.q.tr.quality + 0.3 * Math.min(1.4, x.q.area)));
+    for (const { q } of cands){ if (picks.length >= 5) break; const sg = sig(q.mirror ? mirrorPts(q.tr.pts) : q.tr.pts); if (sigs.every(o => diff(o, sg) > 0.035)){ picks.push(q); sigs.push(sg); } }
+    if (picks.length > 1){
+      const ch = await chooseFrame(picks.map(q => ({ ...q, pts:q.cur ? q.tr.pts : (q.mirror ? mirrorPts(q.tr.pts) : q.tr.pts), paired:true, tr:q.tr })), `لقيت ${picks.length - 1} شكل تاني — اختار الأقرب (1 = الحالي)`);
+      if (ch === null || ch === 0){ if (note) note.textContent = 'خليت الشكل زي ما هو'; renderShapes(); return; }
+      if (ch === 'manual'){ renderShapes(); openTraceEditor(); return; }
+      best = picks[ch];
+    } else if (note){ note.textContent = 'كل القراءات طلعت نفس الشكل — ✏️ ظبّطه بإيدك أو صوّر على خلفية غامقة'; renderShapes(); return; }
+  }
   if (!best){ if (note) note.textContent = 'معرفتش أقرا الفريم تاني — ' + CLEAR_TIP; renderShapes(); return; }
   const pts = best.mirror ? mirrorPts(best.tr.pts) : best.tr.pts, rim = best.mirror ? mirrorArr(best.tr.rim) : best.tr.rim;
   lastTrace = { ...best.last, mirror:!!best.mirror }; customPreview = best.tr.preview;
@@ -2820,7 +2836,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 55;
+const APP_V = 56;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
