@@ -1277,9 +1277,9 @@ function renderShapes(){
   if (shTab === 'photo'){
     row = `<div class="sh-row sh-photo">
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
+      ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس داخل العدسة فقط</button>` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
       ${lastPhoto && customPts ? `<button class="sh-edit" id="reTrace">🔄 إعادة القراءة</button>` : ''}
-      ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس العدسة (🧠 ذكاء اصطناعي)</button>` : ''}
       ${customPts ? `<button class="sh ${state.shape === 'custom' ? 'on' : ''}" data-sh="custom" title="من صورة الفريم">${shapeIcon('custom')}</button>` : ''}
       <div class="sh-btns">
         <label class="sh-up">📷 كاميرا<input type="file" id="frameCam" accept="image/*" capture="environment"></label>
@@ -3044,7 +3044,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 64;
+const APP_V = 65;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
