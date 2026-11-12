@@ -1269,7 +1269,7 @@ function shapeIcon(id){
 }
 function renderShapes(){
   const box = $('shapes'), groups = [['photo', '📷 من صورة'], ['irregular', 'غير منتظم'], ['regular', 'منتظم']];
-  if (shTab === null) shTab = state.shape === 'custom' ? 'photo' : SHAPES.irregular.some(([id]) => id === state.shape) ? 'irregular' : 'regular';
+  if (shTab === null) shTab = 'photo';   // the lens-shape section opens on "📷 من صورة" by default
   let row = '';
   if (shTab === 'photo'){
     row = `<div class="sh-row sh-photo">
@@ -2093,6 +2093,7 @@ document.querySelectorAll('.rst').forEach(b => b.addEventListener('click', () =>
 
 // New session
 $('newBtn').addEventListener('click', () => {
+  shTab = null;
   setTimeout(() => { try{ setAtt('B', false); setAtt('D', false); markReview(false); }catch(e){} }, 0);
   state = structuredClone(DEFAULTS);
   $('ocrText').value = ''; $('ocrText').style.display = 'none';
@@ -2764,7 +2765,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 53;
+const APP_V = 54;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
