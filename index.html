@@ -942,7 +942,11 @@ function buildEye(eye){
     const inRange = []; for (const i of vert) if (C[i].y <= yT && C[i].y >= yB) inRange.push(i);
     if (vert.length && inRange.length >= 3 && yT - yB > 1.5 && ext > 0.6){
       let xi = Infinity, xo = -Infinity, iT0 = inRange[0]; for (const i of inRange){ const o = outX(i); if (o < xi){ xi = o; iT0 = i; } xo = Math.max(xo, o); }
-      const x0 = xi - Math.max(1.0, rimMM * 0.5), x1 = xo + ext, zF = zf[iT0] - 1.0, zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
+      // end of the block = measured in the photo from the lens edge to the tip of the endpiece (full width), so its
+      // length past the rim's outer face is exactly what the photo shows
+      let xin = -Infinity; for (const i of inRange) xin = Math.max(xin, C[i].x * sgnT);
+      const xTip = customEP.full ? xin + Math.min(customEP.full, 0.45) * state.A : xo + ext;
+      const x0 = xi - Math.max(1.0, rimMM * 0.5), x1 = Math.max(xo + 0.8, xTip), zF = zf[iT0] - 1.0, zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
       const D = Math.max(1.2, zF - zB0), hgt = yT - yB, len = x1 - x0;
       const r = Math.min(hgt / 2, len) * 0.6, rIn = Math.min(hgt / 2, 1.2);
       const sh = new THREE.Shape(), X = v => sgnT * v;
@@ -1528,7 +1532,7 @@ function traceLens(img, box, opts = {}){
           if (best){
             const ws = best.map(r => r.w).sort((p, q) => p - q), wm = ws[ws.length >> 1];
             const ext = Math.min(0.3, (wm - base) / Wk);
-            if (ext > 0.03) ep = { top:(best[0].yc - ymid) / hh2, bot:(best[best.length - 1].yc - ymid) / hh2, ext, rim:base / Wk,
+            if (ext > 0.03) ep = { top:(best[0].yc - ymid) / hh2, bot:(best[best.length - 1].yc - ymid) / hh2, ext, rim:base / Wk, full:Math.min(0.45, wm / Wk),
               poly:best.map(r => [[(r.ex + side * base) / k, r.yc / k], [(r.ex + side * Math.min(r.w, wm * 1.15)) / k, r.yc / k]]) };
           }
         }
@@ -1556,7 +1560,7 @@ function traceLens(img, box, opts = {}){
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh, raw:RAW, outer:OUT };
-  return { pts, rim, ep:ep && { top:ep.top, bot:ep.bot, ext:ep.ext, rim:ep.rim }, epPoly:ep && ep.poly, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
+  return { pts, rim, ep:ep && { top:ep.top, bot:ep.bot, ext:ep.ext, rim:ep.rim, full:ep.full }, epPoly:ep && ep.poly, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
 }
 
 /* Offline lens locator: the user drags a box around ONE lens (finger or mouse); returns normalised {x0,y0,x1,y1}. */
@@ -2664,7 +2668,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 48;
+const APP_V = 49;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
