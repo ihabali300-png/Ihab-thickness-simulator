@@ -1,0 +1,52 @@
+name: Fetch trace photos
+# Pulls Ihab's test photos from his Drive folder (through his Apps Script), shrinks them and publishes them
+# ENCRYPTED with Claude's public key, so only Claude's session can open them.
+on:
+  push:
+    paths: ['.github/fetch-photos.txt']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: { group: fetch-photos, cancel-in-progress: true }
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pillow requests
+      - name: Download + shrink
+        run: |
+          python3 - <<'PY'
+          import json, base64, io, os, re, requests
+          from PIL import Image, ImageOps
+          html = open('card.html', encoding='utf-8').read()
+          API = re.search(r"const API = '([^']+)'", html).group(1); TOK = re.search(r"const TOKEN = '([^']+)'", html).group(1)
+          call = lambda **k: requests.post(API, data=json.dumps({'token': TOK, **k}), timeout=120, allow_redirects=True).json()
+          lst = call(action='tracePhotos'); assert lst.get('ok'), lst
+          os.makedirs('out', exist_ok=True); meta = []
+          for i, f in enumerate(lst['files']):
+              r = call(action='tracePhoto', id=f['id'])
+              if not r.get('ok'): print('skip', f['name'], r); continue
+              im = ImageOps.exif_transpose(Image.open(io.BytesIO(base64.b64decode(r['data'])))).convert('RGB')
+              im.thumbnail((1600, 1600)); name = f"{i:03d}_{(f['group'] or 'misc')}.jpg"
+              im.save('out/' + name, quality=88); meta.append({'file': name, 'group': f['group'], 'orig': f['name']})
+              print('ok', name)
+          json.dump(meta, open('out/meta.json', 'w'))
+          PY
+      - name: Encrypt
+        run: |
+          cd out && zip -q -r ../photos.zip . && cd ..
+          openssl rand 32 > k.bin
+          openssl enc -aes-256-cbc -pbkdf2 -salt -in photos.zip -out photos.zip.enc -pass file:k.bin
+          openssl pkeyutl -encrypt -pubin -inkey .github/trace_pub.pem -in k.bin -out key.enc
+          rm -f k.bin photos.zip
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: trace-photos
+          name: trace-photos (encrypted test data)
+          prerelease: true
+          make_latest: false
+          body: "Encrypted test photos for the frame tracer — unreadable without Claude's private key."
+          files: |
+            photos.zip.enc
+            key.enc
