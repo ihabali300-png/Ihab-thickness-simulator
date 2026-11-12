@@ -629,6 +629,7 @@ const SHAPE_NAME = Object.fromEntries([...SHAPES.regular, ...SHAPES.irregular, [
 let customRim = null;    // rim width from the same photo (fraction of lens width per outline point) → plastic face like the photo
 const photoBridge = () => state.shape === 'custom' && customBridge && customBridge.top > customBridge.bot ? customBridge : null;
 let customBridge = null; // bridge from the photo: { dbl, top, bot } (top/bot in half-lens-heights, y up)
+let customEP = null;     // endpiece from the photo: { top, bot (half-heights), ext (share of lens width) }
 let customPts = null;     // lens outline traced from a frame photo (canonical: temporal = +x, y up)
 let customPreview = null; // dataURL of the crop with the traced outline
 let lastTrace = null;     // photo + lens centre of the last trace (for manual editing)
@@ -907,6 +908,15 @@ function buildEye(eye){
       for (let m = 0; m < th.length; m++){ const d = Math.abs(Math.atan2(Math.sin(t - th[m]), Math.cos(t - th[m]))); if (d < bd){ bd = d; bi = m; } }
       return Math.max(1.2, Math.min(9, customRim[bi] * state.A)); });
     rimAt = raw.map((_, i) => { let sm = 0; for (let q = -3; q <= 3; q++) sm += raw[(i + q + N) % N]; return sm / 7; });
+    if (customEP){
+      // endpiece: temporal points between its top and bottom are pushed out to one vertical face (like the real block)
+      const xEnd = a + customEP.rim * state.A + customEP.ext * state.A, yT = customEP.top * b, yB = customEP.bot * b, fade = 0.12 * b;
+      for (let i = 0; i < N; i++){
+        const p = C[i], nx = Mt[i].x * sgnT, xt = p.x * sgnT; if (nx < 0.25 || xt < 0) continue;
+        const wgt = Math.min(1, Math.max(0, (Math.min(yT - p.y, p.y - yB) + fade) / fade)); if (!wgt) continue;
+        const need = (xEnd - xt) / nx; if (need > rimAt[i]) rimAt[i] += (Math.min(need, 14) - rimAt[i]) * wgt;
+      }
+    }
   }
   const rimBackZ = new Array(N).fill(null);
 
@@ -1451,7 +1461,7 @@ function traceLens(img, box, opts = {}){
   }
   const quality = Math.min(1, 0.35 + 0.65 * good / NA);
   // rim width at every output point, as a fraction of the lens width (ray from the outline centre to the outer edge)
-  let rim = null;
+  let rim = null, ep = null;
   if (OUT){
     let mx = 0, my = 0; pts.forEach(p => { mx += p[0]; my += p[1]; }); mx /= pts.length; my /= pts.length;
     let wx0 = Infinity, wx1 = -Infinity; pts.forEach(p => { wx0 = Math.min(wx0, p[0]); wx1 = Math.max(wx1, p[0]); });
@@ -1465,6 +1475,26 @@ function traceLens(img, box, opts = {}){
     const sr = rim.slice().sort((p, q) => p - q), m = sr[sr.length >> 1];
     if (!(m > 0.015 && m < 0.2)) rim = null;                     // no believable face edge → keep the standard rim
     else {
+      // endpiece (the block on the temple side the hinge sits on): a run of much wider "rim" around the temporal
+      // direction (+x, or −x for a left lens: opts.side = −1). Kept apart from the smooth face and drawn in its own colour.
+      { const raw = rim.slice(), M = raw.length, side = opts.side === -1 ? -1 : 1;
+        let hy0 = Infinity, hy1 = -Infinity; pts.forEach(p => { hy0 = Math.min(hy0, p[1]); hy1 = Math.max(hy1, p[1]); }); const hh2 = (hy1 - hy0) / 2;
+        const isT = i => { const t = Math.atan2(pts[i][1] - my, (pts[i][0] - mx) * side); return Math.abs(t) < 0.9; };
+        let best = null;
+        for (let i = 0; i < M; i++){
+          if (!isT(i) || raw[i] < m * 1.55) continue;
+          let j = i; const run = []; while (isT(j % M) && raw[j % M] >= m * 1.35 && run.length < M){ run.push(j % M); j++; }
+          const sc = run.reduce((s2, q) => s2 + raw[q] - m, 0);
+          if (run.length >= 4 && run.length <= 40 && (!best || sc > best.sc)) best = { run, sc };
+          i = j;
+        }
+        if (best){
+          const ext = Math.min(0.22, Math.max(...best.run.map(q => raw[q])) - m);
+          const ys = best.run.map(q => (pts[q][1] - my) / hh2);
+          if (ext > 0.02) ep = { top:Math.max(...ys), bot:Math.min(...ys), ext, rim:m, poly:best.run.map(q => { const p = pts[q], dx = p[0] - mx, dy = p[1] - my, L0 = Math.hypot(dx, dy) || 1;
+            return [p, [p[0] + dx / L0 * raw[q] * W0, p[1] + dy / L0 * raw[q] * W0]]; }) };
+        }
+      }
       rim = rim.map(w => Math.min(m * 1.9, Math.max(m * 0.55, w)));
       const M = rim.length, H = 4, re = [], im = [];
       for (let h = 0; h <= H; h++){ let c = 0, d = 0; for (let i = 0; i < M; i++){ const t = 2 * Math.PI * h * i / M; c += rim[i] * Math.cos(t); d += rim[i] * Math.sin(t); } re.push(c / M); im.push(d / M); }
@@ -1479,12 +1509,16 @@ function traceLens(img, box, opts = {}){
   pc.strokeStyle = '#a3e635'; pc.lineWidth = 2; pc.beginPath();
   pts.forEach(([x, y], i) => { const X = (icx + x - px0) * sc, Y = (icy - y - py0) * sc; i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); });
   pc.closePath(); pc.stroke();
+  if (ep){ pc.fillStyle = 'rgba(56,189,248,.45)'; pc.strokeStyle = '#38bdf8'; pc.lineWidth = 1.5; pc.beginPath();
+    const T = ([x, y]) => [(icx + x - px0) * sc, (icy - y - py0) * sc];
+    ep.poly.forEach(([, o], i) => { const [X, Y] = T(o); i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); });
+    ep.poly.slice().reverse().forEach(([p]) => { const [X, Y] = T(p); pc.lineTo(X, Y); }); pc.closePath(); pc.fill(); pc.stroke(); }
   if (OUT && rim){ pc.strokeStyle = '#fb923c'; pc.lineWidth = 1.5; pc.setLineDash([4, 3]); pc.beginPath();
     OUT.forEach(([x, y], i) => { const X = (icx + x - px0) * sc, Y = (icy - y - py0) * sc; i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); }); pc.closePath(); pc.stroke(); pc.setLineDash([]); }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh, raw:RAW, outer:OUT };
-  return { pts, rim, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
+  return { pts, rim, ep:ep && { top:ep.top, bot:ep.bot, ext:ep.ext, rim:ep.rim }, epPoly:ep && ep.poly, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
 }
 
 /* Offline lens locator: the user drags a box around ONE lens (finger or mouse); returns normalised {x0,y0,x1,y1}. */
@@ -1663,6 +1697,7 @@ function findFrames(img){
     // prefer the image-right lens; use the mirrored left one only if it traced clearly better
     const pick = left && left.tr.quality > right.tr.quality + 0.08 ? left : right;
     const mirror = pick === left || (!left && cx(a) < 0.5);   // a lone lens on the left half is most likely a left lens
+    if (mirror){ const tr2 = traceLens(img, pick.box, { side:-1 }); pick.tr = tr2; pick.last = lastTrace; }
     let bridge = null;
     if (left) try{ bridge = measureBridge(img, left, right); }catch(e){ console.error(e); }
     frames.push({ ...pick, mirror, y:cy(pick), bridge, paired:!!left });
@@ -1701,7 +1736,7 @@ function chooseFrame(frames){
 const mirrorPts = P => { const M = P.length; return P.map((_, m) => { const q = P[(M / 2 - m + M) % M]; return [-q[0], q[1]]; }); };
 const mirrorArr = A => A && A.map((_, m) => A[(A.length / 2 - m + A.length) % A.length]);
 function useTrace(tr, note){
-  customPts = tr.pts; customRim = tr.rim || null; state.shape = 'custom';
+  customPts = tr.pts; customRim = tr.rim || null; customEP = tr.ep || null; state.shape = 'custom';
   if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
   syncUI(); requestRebuild(); renderShapes();
   $('shNote').textContent = note || `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
@@ -2589,7 +2624,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 41;
+const APP_V = 42;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
