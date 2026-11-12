@@ -1210,7 +1210,7 @@ function renderShapes(){
         <label class="sh-up">📷 كاميرا<input type="file" id="frameCam" accept="image/*" capture="environment"></label>
         <label class="sh-up alt">🖼️ من الاستديو<input type="file" id="framePhoto" accept="image/*"></label>
       </div>
-      <div class="sh-note" id="shNote">صوّر الفريم من فوق على ورقة بيضا</div></div>`;
+      <div class="sh-note" id="shNote">صوّر الفريم على خلفية سادة: فاتحة، ولو الفريم شفاف غامقة</div></div>`;
   } else if (shTab){
     row = `<div class="sh-row">${SHAPES[shTab].map(([id, n]) => `<button class="sh ${id === state.shape ? 'on' : ''}" data-sh="${id}" title="${n}">${shapeIcon(id)}</button>`).join('')}</div>`;
   }
@@ -1430,13 +1430,14 @@ function traceLens(img, box, opts = {}){
 }
 
 /* Offline lens locator: the user drags a box around ONE lens (finger or mouse); returns normalised {x0,y0,x1,y1}. */
-function pickBox(img){
+function pickBox(img, hint = ''){
   return new Promise(resolve => {
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000d;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px;touch-action:none';
     const tip = document.createElement('div');
     tip.style.cssText = 'color:#d9f99d;font-weight:700;font-size:15px;text-align:center;direction:rtl';
     tip.textContent = 'اسحب بصباعك مربع حوالين عدسة واحدة (مع الإطار)';
+    if (hint){ const h = document.createElement('div'); h.style.cssText = 'color:#fde68a;font-size:13px;margin-top:6px'; h.textContent = hint; tip.appendChild(h); }
     const wrap = document.createElement('div'); wrap.style.cssText = 'position:relative;max-width:100%;max-height:72vh;line-height:0';
     const cv = document.createElement('canvas'); cv.width = img.cv.width; cv.height = img.cv.height;
     cv.style.cssText = 'max-width:94vw;max-height:72vh;border:1px solid #a3e63566;border-radius:6px;touch-action:none';
@@ -1579,6 +1580,7 @@ function findFrames(img){
 // ---- end lens finder
 /* Several frames (or both lenses) in one photo → a small chooser: one button per frame with its traced outline,
    tap = apply and close. Resolves to the index, 'manual' (draw the box by hand) or null. */
+const CLEAR_TIP = '💡 لو الفريم شفاف صوّره على خلفية غامقة (ورقة أو قماشة سودا) عشان الحافة تبان';
 function chooseFrame(frames){
   return new Promise(resolve => {
     const ov = document.createElement('div');
@@ -1592,7 +1594,8 @@ function chooseFrame(frames){
       <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">${frames.map((f, i) => `<button data-i="${i}" style="position:relative;padding:6px 8px;border-radius:10px;border:1px solid #a3e635;background:#000;line-height:0">${svg(f)}<span style="position:absolute;top:2px;right:5px;font-size:10px;line-height:1;color:#a3e635aa">${i + 1}</span></button>`).join('')}</div>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
         <button data-m="1" style="padding:8px 14px;border-radius:8px;border:1px solid #a3e63588;background:#1f2937;color:#ecfccb;font-size:13px">✏️ أحدد بإيدي</button>
-        <button data-x="1" style="padding:8px 14px;border-radius:8px;border:1px solid #555;background:#1f2937;color:#ecfccb;font-size:13px">✕ إلغاء</button></div>`;
+        <button data-x="1" style="padding:8px 14px;border-radius:8px;border:1px solid #555;background:#1f2937;color:#ecfccb;font-size:13px">✕ إلغاء</button></div>
+      ${frames.some(f => f.tr.quality < 0.95) ? `<div style="color:#fde68a;font-size:12px;margin-top:10px">${CLEAR_TIP}</div>` : ''}`;
     ov.appendChild(sh); document.body.appendChild(ov);
     const close = v => { ov.remove(); resolve(v); };
     ov.addEventListener('click', e => { if (e.target === ov) close(null); });
@@ -1608,6 +1611,7 @@ function useTrace(tr, note){
   if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
   syncUI(); requestRebuild(); renderShapes();
   $('shNote').textContent = note || `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
+  if (tr.quality < 0.9) $('shNote').textContent += ' — ' + CLEAR_TIP;
 }
 async function traceFrame(file){
   if (!file) return;
@@ -1627,19 +1631,20 @@ async function traceFrame(file){
       if (pick !== 'manual'){
         const f = frames[pick];
         lastTrace = f.mirror ? null : f.last; customPreview = f.tr.preview;
-        useTrace({ ...f.tr, pts:f.pts }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع` : null);
+        useTrace({ ...f.tr, pts:f.pts }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع${f.tr.quality < 0.9 ? ' — ' + CLEAR_TIP : ''}` : null);
         return;
       }
     }
+    const hint = frames.length ? '' : 'ملقتش الفريم لوحدي — ' + CLEAR_TIP;
     let box;
-    if (pick === 'manual'){ note.textContent = '👆 حدد العدسة اليمين بمربع على الصورة'; box = await pickBox(img); if (!box){ note.textContent = 'اتلغى التحديد'; return; } }
+    if (pick === 'manual'){ note.textContent = '👆 حدد العدسة اليمين بمربع على الصورة'; box = await pickBox(img, hint); if (!box){ note.textContent = 'اتلغى التحديد'; return; } }
     else if (lim && lim.images){
       note.textContent = '🤖 بحدد مكان العدسة…';
       const blob = await new Promise(r => img.cv.toBlob(r, 'image/jpeg', 0.88));
       box = await sample.json(FRAME_PROMPT, { images:[blob], modelTier:'complex' });
     } else {
       note.textContent = '👆 حدد العدسة اليمين بمربع على الصورة';
-      box = await pickBox(img);
+      box = await pickBox(img, hint);
       if (!box){ note.textContent = 'اتلغى التحديد'; return; }
     }
     const ok = box && [box.x0, box.y0, box.x1, box.y1].every(v => isFinite(+v) && +v >= 0 && +v <= 1) && Math.abs(box.x1 - box.x0) > 0.05 && Math.abs(box.y1 - box.y0) > 0.03;
@@ -1657,8 +1662,8 @@ async function traceFrame(file){
       if (boxAspect > 0.9 && boxAspect < 2.4) state.B = snap(state.A / boxAspect, 0.5, 26, 50);
       syncUI(); requestRebuild(); renderShapes();
       $('shNote').textContent = preset
-        ? `الحافة مش واضحة كفاية (${Math.round(tr.quality * 100)}%) — اخترت أقرب شكل: ${SHAPE_NAME[preset]}. للدقة صوّر من فوق على ورقة بيضا`
-        : 'الحافة مش واضحة — صوّر من فوق بالظبط على ورقة بيضا';
+        ? `الحافة مش واضحة كفاية (${Math.round(tr.quality * 100)}%) — اخترت أقرب شكل: ${SHAPE_NAME[preset]} — ${CLEAR_TIP}`
+        : 'الحافة مش واضحة — ' + CLEAR_TIP;
     }
   } catch(err){
     console.error(err);
@@ -2482,7 +2487,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 36;
+const APP_V = 37;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
