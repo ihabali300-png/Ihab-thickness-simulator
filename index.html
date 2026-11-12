@@ -943,12 +943,12 @@ function buildEye(eye){
     // at the height the photo shows; the rim-side edge follows the rim curve, so it stays attached on round lenses too
     if (yT - yB > 0.45 * b){ const c = Math.min(0.62 * b, (yT + yB) / 2); yT = c + 0.225 * b; yB = c - 0.225 * b; }   // endpieces are short blocks
     const inRange = []; for (let i = 0; i < N; i++) if (C[i].x * sgnT > 0.3 * a && C[i].y <= yT && C[i].y >= yB) inRange.push(i);
-    if (inRange.length >= 3 && yT - yB > 1.5 && ext > 0.6){
+    if (inRange.length >= 3 && yT - yB > Math.max(2.5, 0.14 * b) && ext > 0.6){   // a thin sliver (cat-eye tip, reflections) is not an endpiece
       let xi = Infinity, xo = -Infinity, iT0 = inRange[0]; for (const i of inRange){ const o = outX(i); if (o < xi){ xi = o; iT0 = i; } xo = Math.max(xo, o); }
       // end of the block = measured in the photo from the lens edge to the tip of the endpiece (full width), so its
       // length past the rim's outer face is exactly what the photo shows
       const xTip = customEP.tip ? customEP.tip * a : xo + ext;   // tip position from the photo (same distance from the lens centre)
-      const x1 = Math.min(xo + 0.16 * state.A, Math.max(xo + 0.8, xTip)), zF = Math.min(...inRange.map(i => zf[i])) - 1.0,
+      const x1 = Math.min(xo + 0.09 * state.A, Math.max(xo + 0.8, xTip)), zF = Math.min(...inRange.map(i => zf[i])) - 1.0,
         zB0 = Math.max(...inRange.map(i => rimBackZ[i] !== null ? rimBackZ[i] : zf[i] - Math.max(baseD, 2))) + 0.5;   // stays inside the rim's depth: never sticks out at the back (wrap curve included)
       const D = Math.max(1.2, zF - zB0), hgt = yT - yB, r = Math.min(hgt / 2, (x1 - xo)) * 0.6;
       // outline: the rim side follows the rim's own curve (inside the rim body, never into the lens); top and bottom
@@ -2846,7 +2846,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 57;
+const APP_V = 58;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
