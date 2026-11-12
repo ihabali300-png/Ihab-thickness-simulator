@@ -408,7 +408,7 @@
       </div>
       <div class="np" id="trNp"><span>عدد النقط</span><button data-n="16">16</button><button data-n="24">24</button><button data-n="32">32</button><button data-n="40">40</button><button data-n="48">48</button></div>
       <div class="rd" id="trRdRow"><span>زوايا مدوّرة</span><input type="range" id="trRd" min="0" max="45" step="1" value="12"><span>زوايا حادة</span></div>
-      <div class="zm"><button id="trZo">－</button><button id="trZf">⤢</button><button id="trZi">＋</button><button id="trSnap" style="width:auto;padding:0 12px;background:#1a2e05;color:#d9f99d;border-color:#a3e635">✨ ظبّط ذكي</button></div>
+      <div class="zm"><button id="trZo">－</button><button id="trZf">⤢</button><button id="trZi">＋</button><button id="trMv" style="width:auto;padding:0 10px">👆 نقطة</button><button id="trSnap" style="width:auto;padding:0 12px;background:#1a2e05;color:#d9f99d;border-color:#a3e635">✨ ظبّط ذكي</button></div>
       <canvas id="trCv"></canvas>
       <div class="bt"><button class="no" id="trNo">إلغاء</button><button class="ok" id="trOk">تم ✓ طبّق الشكل</button></div>
     </div>
@@ -2756,7 +2756,7 @@ function drawTrace(){
     g.fillStyle = i === trDrag ? 'rgba(163,230,53,.9)' : 'rgba(163,230,53,.45)'; g.fill(); g.lineWidth = 2 * dpr; g.strokeStyle = '#0b1a0f'; g.stroke(); });
 }
 function trPos(e){ const r = $('trCv').getBoundingClientRect(), { sx, sy, k } = trView; return [sx + (e.clientX - r.left) / k, sy + (e.clientY - r.top) / k]; }
-const trPts = new Map(); let trPinch = null, trTap = null;
+const trPts = new Map(); let trPinch = null, trTap = null, trMoveAll = false;
 const trZoom = (f, mx, my) => {   // zoom by f around canvas point (css px) mx,my
   const v = trView, wx = v.sx + mx / v.k, wy = v.sy + my / v.k, W = lastTrace.cv.width, H = lastTrace.cv.height;
   let sw = Math.min(W * 1.2, Math.max(v.home.sw * 0.25, v.sw / f)), sh = sw * v.cssH / v.cssW;
@@ -2767,6 +2767,7 @@ $('trCv').addEventListener('pointerdown', e => {
   trPts.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
   if (trPts.size === 2){ trDrag = -1; trTap = null; const [p, q] = [...trPts.values()];
     trPinch = { d:Math.hypot(p[0] - q[0], p[1] - q[1]), m:[(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] }; return; }
+  if (trMoveAll){ trTap = { all:true, x:e.clientX, y:e.clientY, H:trHandles.map(p => p.slice()) }; return; }   // whole shape moves as one
   const [x, y] = trPos(e); let bi = -1, bd = Infinity;
   trHandles.forEach(([hx, hy], i) => { const d = Math.hypot(hx - x, hy - y); if (d < bd){ bd = d; bi = i; } });
   if (bd * trView.k < (trHandles.length > 36 ? 20 : trHandles.length > 20 ? 26 : 36)){ trDrag = bi; trTap = { i:bi, x:e.clientX, y:e.clientY }; drawTrace(); }
@@ -2776,6 +2777,7 @@ $('trCv').addEventListener('pointermove', e => {
   if (!trPts.has(e.pointerId)) return; const r = $('trCv').getBoundingClientRect(); trPts.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
   if (trPinch && trPts.size === 2){ const [p, q] = [...trPts.values()], d = Math.hypot(p[0] - q[0], p[1] - q[1]), m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
     trView.sx -= (m[0] - trPinch.m[0]) / trView.k; trView.sy -= (m[1] - trPinch.m[1]) / trView.k; trZoom(d / trPinch.d, m[0], m[1]); trPinch = { d, m }; return; }
+  if (trTap && trTap.all){ const dx = (e.clientX - trTap.x) / trView.k, dy = (e.clientY - trTap.y) / trView.k; trHandles = trTap.H.map(([a, b]) => [a + dx, b + dy]); drawTrace(); return; }
   if (trTap && trTap.pan){ trView.sx = trTap.sx - (e.clientX - trTap.x) / trView.k; trView.sy = trTap.sy - (e.clientY - trTap.y) / trView.k; drawTrace(); return; }
   if (trDrag < 0) return;
   if (trTap && Math.hypot(e.clientX - trTap.x, e.clientY - trTap.y) > 5) trTap = null;
@@ -2783,7 +2785,7 @@ $('trCv').addEventListener('pointermove', e => {
 });
 const trEnd = e => {
   trPts.delete(e.pointerId); if (trPts.size < 2) trPinch = null;
-  if (trTap && !trTap.pan && trDrag >= 0 && trMode === 'auto'){ trSharp[trDrag] = !trSharp[trDrag]; }   // tap = sharp ⇄ smooth
+  if (trTap && !trTap.pan && !trTap.all && trDrag >= 0 && trMode === 'auto'){ trSharp[trDrag] = !trSharp[trDrag]; }   // tap = sharp ⇄ smooth
   trTap = null; trDrag = -1; if (trView) drawTrace();
 };
 $('trCv').addEventListener('pointerup', trEnd); $('trCv').addEventListener('pointercancel', trEnd);
@@ -2792,6 +2794,7 @@ $('trZi').addEventListener('click', () => trZoom(1.3, trView.cssW / 2, trView.cs
 $('trZo').addEventListener('click', () => trZoom(1 / 1.3, trView.cssW / 2, trView.cssH / 2));
 $('trZf').addEventListener('click', () => { Object.assign(trView, trView.home); trView.k = trView.cssW / trView.sw; drawTrace(); });
 $('trM0').addEventListener('click', () => trSetMode('auto'));
+$('trMv').addEventListener('click', () => { trMoveAll = !trMoveAll; const b = $('trMv'); b.textContent = trMoveAll ? '✋ الشكل كله' : '👆 نقطة'; b.style.background = trMoveAll ? 'var(--lime)' : ''; b.style.color = trMoveAll ? '#0b1a0f' : ''; });
 /* ✨ smart tidy: starts from YOUR points, pulls the outline onto the nearest real lens edge in the photo
    (a few px either side, inner rim edge preferred), irons out jumps, then lays the points evenly and marks the
    corners again → a clean shape that still follows what you set. Can be pressed again after more edits. */
@@ -2804,7 +2807,7 @@ $('trSnap').addEventListener('click', () => {
     const tot = L[L.length - 1]; let j = 0; for (let k = 0; k < M; k++){ const d = k * tot / M; while (j < O0.length - 1 && L[j + 1] < d) j++;
       const a = O0[j], b = O0[(j + 1) % O0.length], t = (d - L[j]) / ((L[j + 1] - L[j]) || 1); O.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); } }
   let cx = 0, cy = 0, x0 = 1e9, x1 = -1e9; O.forEach(p => { cx += p[0]; cy += p[1]; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); }); cx /= M; cy /= M;
-  const Rw = Math.max(3, (x1 - x0) * 0.035), off = new Float32Array(M);
+  const Rw = Math.max(4, (x1 - x0) * 0.07), off = new Float32Array(M);
   for (let i = 0; i < M; i++){
     const a = O[(i - 1 + M) % M], b = O[(i + 1) % M], p = O[i]; let nx = b[1] - a[1], ny = -(b[0] - a[0]); const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
     if ((p[0] - cx) * nx + (p[1] - cy) * ny < 0){ nx = -nx; ny = -ny; }   // outward
@@ -2880,7 +2883,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 59;
+const APP_V = 60;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
