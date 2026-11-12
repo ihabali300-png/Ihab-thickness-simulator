@@ -1991,7 +1991,7 @@ async function aiTapMode(){
   if (!lastPhoto) return;
   const img = lastPhoto.img, cv = img.show || img.cv, W = img.cv.width, H = img.cv.height;
   const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl';
-  ov.innerHTML = `<div id="atMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5">👆 حط نقطة خضرا جوه العدسة (لو الدراع قاسمها: فوقه وتحته) أو ارسمها ✏️ — وبعدين شغّل 🧠</div>
+  ov.innerHTML = `<div id="atMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5">✋ قرّب وحرّك براحتك — وبعدين اختار 👆 نقط أو ✏️ رسم، وفي الآخر شغّل 🧠</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding:0 8px 8px">
       <button class="atB" data-act="add" style="--c:#22c55e">➕ إضافة</button><button class="atB" data-act="del" style="--c:#ef4444">➖ إزالة</button>
       <span style="width:10px"></span>
@@ -2010,7 +2010,7 @@ async function aiTapMode(){
   const c = ov.querySelector('#atCv'), msg = ov.querySelector('#atMsg'), dpr = Math.min(2, devicePixelRatio || 1);
   const cssW = Math.min(innerWidth, 700), cssH = Math.min(innerHeight - 140, cssW * H / W), k = Math.min(cssW / W, cssH / H);
   c.style.width = W * k + 'px'; c.style.height = H * k + 'px'; c.width = W * k * dpr; c.height = H * k * dpr;
-  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pt', stroke = null, aiOn = false;
+  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pan', stroke = null, aiOn = false, multi = false;   // opens on ✋ (zoom/move) — no stray points
   const V = { x:0, y:0, s:k };   // image px = V.x + css px / V.s  (pinch / ＋ － / ✋ to move)
   const toImg = e => { const r = c.getBoundingClientRect(), sc = W * k / r.width; return [(V.x + (e.clientX - r.left) * sc / V.s) / W, (V.y + (e.clientY - r.top) * sc / V.s) / H]; };   // css size can differ from the drawing size
   const zoom = (f2, mx, my) => { const wx = V.x + mx / V.s, wy = V.y + my / V.s; V.s = Math.max(k, Math.min(k * 8, V.s * f2)); V.x = wx - mx / V.s; V.y = wy - my / V.s;
@@ -2034,6 +2034,7 @@ async function aiTapMode(){
   };
   const ptrs = new Map(); let pinch = null, panS = null;
   c.addEventListener('pointerdown', e => { const r = c.getBoundingClientRect(); ptrs.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
+    if (ptrs.size >= 2) multi = true;
     if (ptrs.size === 2){ stroke = null; const [a, b] = [...ptrs.values()]; pinch = { d:Math.hypot(a[0] - b[0], a[1] - b[1]), m:[(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; }
     else if (tool === 'pan'){ c.setPointerCapture(e.pointerId); panS = { x:e.clientX, y:e.clientY, vx:V.x, vy:V.y }; } });
   c.addEventListener('pointermove', e => { if (!ptrs.has(e.pointerId)) return; const r = c.getBoundingClientRect(); ptrs.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
@@ -2063,7 +2064,8 @@ async function aiTapMode(){
   const aiBtn = ov.querySelector('#atAI'), aiShow = () => { aiBtn.classList.toggle('on', aiOn); aiBtn.textContent = aiOn ? '🧠 ذكاء: شغال' : '🧠 ذكاء: مطفي'; };
   aiBtn.onclick = () => { aiOn = !aiOn; aiShow(); if (aiOn && (pos.length || res)) runAI(); };
   c.addEventListener('pointerup', async e => {
-    const wasPinch = pinch || ptrs.size > 1; endP(e); if (wasPinch || tool === 'pan') return;
+    endP(e); if (multi){ if (!ptrs.size) multi = false; stroke = null; return; }   // any two-finger gesture never leaves a point
+    if (tool === 'pan') return;
     if (tool === 'draw'){ if (stroke && stroke.length > 5){ lasso(stroke, act === 'add'); stroke = null; draw(); if (res){ msg.textContent = '✓ اتعدّل — كمّل أو دوس تم ✓'; okOn(); } } stroke = null; return; }
     if (busy){ msg.textContent = msg.textContent.replace(/ — استنى.*/, '') + ' — استنى لحد ما يخلص'; return; }
     const [x, y] = toImg(e);
@@ -3129,7 +3131,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 69;
+const APP_V = 70;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
