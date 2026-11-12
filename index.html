@@ -1366,7 +1366,7 @@ function traceLens(img, box, opts = {}){
     for (let m = 0; m < M; m++){ const target = tot * m / M; while (L[s + 1] < target) s++; const p = Q[s], q = Q[(s + 1) % Q.length], u = (target - L[s]) / ((L[s + 1] - L[s]) || 1);
       out.push([p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u]); } return out; };
   const H0 = hullOf(P);
-  if (rimless || area(P) / area(H0) > 0.975) P = H0;                         // near-convex → wrap (nose-pad dents, glare gaps)
+  if (rimless || area(P) / area(H0) > 0.93) P = H0;                          // near-convex → wrap (nose-pad dents, glare gaps, a temple crossing behind the rim)
   const M = 240; let Q = resample(P, M);
   const wN = 5, turn = new Float32Array(M);
   for (let i = 0; i < M; i++){ const a = Q[(i - wN + M) % M], b = Q[i], c = Q[(i + wN) % M];
@@ -2288,7 +2288,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 32;
+const APP_V = 33;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
