@@ -910,11 +910,13 @@ function buildEye(eye){
     rimAt = raw.map((_, i) => { let sm = 0; for (let q = -3; q <= 3; q++) sm += raw[(i + q + N) % N]; return sm / 7; });
     if (customEP){
       // endpiece: temporal points between its top and bottom are pushed out to one vertical face (like the real block)
-      const xEnd = a + customEP.rim * state.A + customEP.ext * state.A, yT = customEP.top * b, yB = customEP.bot * b, fade = 0.12 * b;
+      // only where the rim faces the temple (not the top/bottom curve), never more than rim + endpiece, inside the lens height
+      const ext = Math.min(customEP.ext, 0.14) * state.A, xEnd = a + customEP.rim * state.A + ext;
+      const yT = Math.min(customEP.top, 0.9) * b, yB = Math.max(customEP.bot, -0.6) * b, fade = 0.15 * b;
       for (let i = 0; i < N; i++){
-        const p = C[i], nx = Mt[i].x * sgnT, xt = p.x * sgnT; if (nx < 0.25 || xt < 0) continue;
+        const p = C[i], m = Mt[i], L = Math.hypot(m.x, m.y) || 1, nx = m.x * sgnT / L, xt = p.x * sgnT; if (nx < 0.6 || xt < 0) continue;
         const wgt = Math.min(1, Math.max(0, (Math.min(yT - p.y, p.y - yB) + fade) / fade)); if (!wgt) continue;
-        const need = (xEnd - xt) / nx; if (need > rimAt[i]) rimAt[i] += (Math.min(need, 14) - rimAt[i]) * wgt;
+        const need = Math.min((xEnd - xt) / nx, rimAt[i] + ext * 1.15); if (need > rimAt[i]) rimAt[i] += (need - rimAt[i]) * wgt;
       }
     }
   }
@@ -2624,7 +2626,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 42;
+const APP_V = 43;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
