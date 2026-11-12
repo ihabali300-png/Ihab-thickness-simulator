@@ -154,6 +154,7 @@
   #trEd .np{ display:flex; align-items:center; gap:6px; font-size:12px; color:#bef264; padding:0 0 6px; }
   #trEd .np button{ background:#030a05; color:#e7f7d2; border:1px solid #a3e63555; border-radius:8px; width:38px; height:28px; font-size:13px; cursor:pointer; font-family:Consolas, monospace; }
   #trEd .np button.on{ background:var(--lime); color:#0b1a0f; font-weight:800; }
+  #trEd .zm{ display:flex; gap:8px; padding:0 0 6px; } #trEd .zm button{ background:#030a05; color:#e7f7d2; border:1px solid #a3e63555; border-radius:8px; width:42px; height:28px; font-size:15px; cursor:pointer; }
   #trEd .rd{ display:flex; align-items:center; gap:8px; font-size:11.5px; color:#bef264; padding:0 0 8px; width:min(330px, 92vw); }
   #trEd .rd input{ flex:1; accent-color:var(--lime); direction:ltr; }
   #trEd .rd.off{ opacity:.35; pointer-events:none; }
@@ -399,13 +400,15 @@
     <div id="hint">اسحب للدوران • العجلة للتقريب</div>
     <div id="err"></div>
     <div id="trEd">
-      <div class="hd">اسحب النقط الخضرا لحد ما تقعد على حافة العدسة بالظبط — خصوصاً الزوايا</div>
+      <div class="hd">اسحب النقط على حافة العدسة — دوسة على نقطة: ⬛ زاوية حادة ⇄ ⚪ منحنى — صباعين: زوم وتحريك</div>
       <div class="md">
-        <button id="trM1" class="on">📐 زوايا</button>
+        <button id="trM0" class="on">🔀 ذكي</button>
+        <button id="trM1">📐 زوايا</button>
         <button id="trM2">〰️ منحنيات</button>
       </div>
-      <div class="np" id="trNp"><span>عدد النقط</span><button data-n="12">12</button><button data-n="16">16</button><button data-n="20">20</button><button data-n="24">24</button><button data-n="32">32</button></div>
+      <div class="np" id="trNp"><span>عدد النقط</span><button data-n="16">16</button><button data-n="24">24</button><button data-n="32">32</button><button data-n="40">40</button><button data-n="48">48</button></div>
       <div class="rd" id="trRdRow"><span>زوايا مدوّرة</span><input type="range" id="trRd" min="0" max="45" step="1" value="12"><span>زوايا حادة</span></div>
+      <div class="zm"><button id="trZo">－</button><button id="trZf">⤢</button><button id="trZi">＋</button></div>
       <canvas id="trCv"></canvas>
       <div class="bt"><button class="no" id="trNo">إلغاء</button><button class="ok" id="trOk">تم ✓ طبّق الشكل</button></div>
     </div>
@@ -1886,6 +1889,7 @@ async function traceFrame(file){
   try{
     const lim = sample ? (typeof sample.limits === 'function' ? await sample.limits() : { images:true }) : null;
     const img = await loadImageData(file);
+    loadImageData(file, 2600).then(h => { trHi = h.cv; }).catch(() => {});   // sharp copy for the manual editor (zoom without blur)
     // 1) offline: find every lens opening in the photo; one frame → apply, several → let the user pick
     note.textContent = '🔎 بدور على الفريمات في الصورة…';
     await new Promise(r => setTimeout(r, 30));
@@ -2637,7 +2641,7 @@ function animate(now){
 }
 
 /* ---- Manual outline editor: drag 12 handles on the photo (fixes faint rimless edges / corners) ---- */
-let trHandles = [], trView = null, trDrag = -1, trMode = 'corner', trRound = 0.12, trN = 16;
+let trHandles = [], trSharp = [], trView = null, trDrag = -1, trMode = 'auto', trRound = 0.12, trN = 32, trHi = null;
 // re-distribute N handles evenly (by arc length) along the outline currently drawn, so the shape is kept
 function trResample(n){
   const O = trOutline(trHandles); if (O.length < 3) return;
@@ -2645,7 +2649,10 @@ function trResample(n){
   const tot = L[L.length - 1], out = []; let j = 0;
   for (let k = 0; k < n; k++){ const d = k * tot / n; while (j < O.length - 1 && L[j + 1] < d) j++;
     const a = O[j], b = O[(j + 1) % O.length], t = (d - L[j]) / ((L[j + 1] - L[j]) || 1); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]); }
-  trHandles = out;
+  // a handle sitting on a sharp turn of the outline becomes a corner (⬛), the rest stay smooth (⚪)
+  const turn = i => { const m = out.length, a = out[(i - 1 + m) % m], b = out[i], c = out[(i + 1) % m];
+    const u = Math.atan2(b[1] - a[1], b[0] - a[0]), v = Math.atan2(c[1] - b[1], c[0] - b[0]); return Math.abs(Math.atan2(Math.sin(v - u), Math.cos(v - u))); };
+  trHandles = out; trSharp = out.map((_, i) => turn(i) > (n >= 32 ? 0.42 : 0.6));
 }
 function trSetN(n){
   trN = n; document.querySelectorAll('#trNp button').forEach(b => b.classList.toggle('on', +b.dataset.n === n));
@@ -2654,6 +2661,21 @@ function trSetN(n){
 /* Outline through the handles: 'corner' = straight sides with rounded corners (radius = trRound × shorter side),
    'curve' = smooth closed centripetal Catmull-Rom spline passing through every handle. */
 function trOutline(V){
+  if (trMode === 'auto'){
+    // piecewise cubic through every handle: smooth handles get Catmull-Rom tangents, sharp ones a short tangent
+    // (set by the roundness slider) → crisp corners and smooth curves in one outline
+    const m = V.length, T = V.map((p, i) => {
+      const a = V[(i - 1 + m) % m], c = V[(i + 1) % m];
+      const f = trSharp[i] ? trRound * 0.9 : 0.5;
+      return [(c[0] - a[0]) * f, (c[1] - a[1]) * f];
+    }), out = [], S = Math.max(6, Math.round(240 / m));
+    for (let i = 0; i < m; i++){
+      const p0 = V[i], p1 = V[(i + 1) % m], t0 = T[i], t1 = T[(i + 1) % m];
+      for (let k = 0; k < S; k++){ const t = k / S, t2 = t * t, t3 = t2 * t, h1 = 2 * t3 - 3 * t2 + 1, h2 = t3 - 2 * t2 + t, h3 = -2 * t3 + 3 * t2, h4 = t3 - t2;
+        out.push([h1 * p0[0] + h2 * t0[0] + h3 * p1[0] + h4 * t1[0], h1 * p0[1] + h2 * t0[1] + h3 * p1[1] + h4 * t1[1]]); }
+    }
+    return out;
+  }
   if (trMode === 'curve'){
     const c = new THREE.CatmullRomCurve3(V.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, 'centripetal');
     return c.getPoints(240).slice(0, 240).map(p => [p.x, p.y]);
@@ -2669,7 +2691,7 @@ function trOutline(V){
   return pts;
 }
 function trSetMode(m){
-  trMode = m; $('trM1').classList.toggle('on', m === 'corner'); $('trM2').classList.toggle('on', m === 'curve');
+  trMode = m; $('trM0').classList.toggle('on', m === 'auto'); $('trM1').classList.toggle('on', m === 'corner'); $('trM2').classList.toggle('on', m === 'curve');
   $('trRdRow').classList.toggle('off', m === 'curve'); if (trView) drawTrace();
 }
 function openTraceEditor(){
@@ -2677,41 +2699,73 @@ function openTraceEditor(){
   const { cv, cx, cy, hw, hh } = lastTrace;
   const pad = 1.45, sx = Math.max(0, cx - hw * pad), sy = Math.max(0, cy - hh * pad);
   const sw = Math.min(cv.width - sx, hw * 2 * pad), sh = Math.min(cv.height - sy, hh * 2 * pad);
-  const maxW = Math.min(window.innerWidth, 700), maxH = window.innerHeight - 150;
-  const k = Math.min(maxW / sw, maxH / sh);
-  const c = $('trCv'), dpr = Math.min(2, window.devicePixelRatio || 1);
-  c.width = Math.round(sw * k * dpr); c.height = Math.round(sh * k * dpr);
-  c.style.width = Math.round(sw * k) + 'px'; c.style.height = Math.round(sh * k) + 'px';
-  trView = { sx, sy, sw, sh, k, dpr };
+  // the whole photo stays available (pinch / ＋ － to zoom, two fingers to move); it opens zoomed on the lens
+  const maxW = Math.min(window.innerWidth, 700), maxH = window.innerHeight - 200;
+  const asp = sw / sh, cssW = Math.min(maxW, maxH * asp), cssH = cssW / asp;
+  const c = $('trCv'), dpr = Math.min(3, window.devicePixelRatio || 1);
+  c.width = Math.round(cssW * dpr); c.height = Math.round(cssH * dpr);
+  c.style.width = Math.round(cssW) + 'px'; c.style.height = Math.round(cssH) + 'px';
+  trView = { sx, sy, sw, sh, k:cssW / sw, dpr, cssW, cssH, home:{ sx, sy, sw, sh } };
   // 12 handles, evenly by angle, from the current outline (canonical y-up, relative to the lens centre)
   const P0 = lastTrace.mirror ? mirrorPts(customPts) : customPts;   // a mirrored left lens is edited on its own photo
   const n = P0.length; trHandles = [];
-  for (let i = 0; i < 12; i++){ const p = P0[Math.round(i * n / 12) % n]; trHandles.push([cx + p[0], cy - p[1]]); }
+  for (let i = 0; i < n; i += 2){ const p = P0[i]; trHandles.push([cx + p[0], cy - p[1]]); }   // dense copy of the traced outline
   $('trEd').classList.add('on');
-  const keepMode = trMode; trMode = 'curve'; trResample(trN); trMode = keepMode;   // start with trN handles on the traced outline
-  trSetN(trN); drawTrace();
+  const keepMode = trMode; trMode = 'corner'; const kr = trRound; trRound = 0; trResample(trN); trRound = kr; trMode = keepMode;   // trN handles on it
+  trSetN(trN); trSetMode(trMode); drawTrace();
 }
 function drawTrace(){
   const c = $('trCv'), g = c.getContext('2d'), { sx, sy, sw, sh, k, dpr } = trView;
   g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, c.width, c.height);
-  g.drawImage(lastTrace.cv, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  const src = trHi && Math.abs(trHi.width / trHi.height - lastTrace.cv.width / lastTrace.cv.height) < 0.02 ? trHi : lastTrace.cv, q = src.width / lastTrace.cv.width;
+  g.imageSmoothingQuality = 'high'; g.fillStyle = '#111'; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(src, sx * q, sy * q, sw * q, sh * q, 0, 0, c.width, c.height);
   const P = trHandles.map(([x, y]) => [(x - sx) * k * dpr, (y - sy) * k * dpr]);
   const O = trOutline(P);
   g.lineWidth = 2.5 * dpr; g.strokeStyle = '#a3e635'; g.beginPath();
   O.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
-  const hr = trHandles.length > 20 ? 7 : trHandles.length > 14 ? 8.5 : 10;
-  P.forEach(([x, y], i) => { g.beginPath(); g.arc(x, y, (i === trDrag ? hr + 3 : hr) * dpr, 0, Math.PI * 2);
+  const hr = trHandles.length > 36 ? 5.5 : trHandles.length > 20 ? 7 : trHandles.length > 14 ? 8.5 : 10;
+  P.forEach(([x, y], i) => { g.beginPath(); const rr = (i === trDrag ? hr + 3 : hr) * dpr;
+    if (trMode === 'auto' && trSharp[i]) g.rect(x - rr, y - rr, rr * 2, rr * 2); else g.arc(x, y, rr, 0, Math.PI * 2);
     g.fillStyle = i === trDrag ? 'rgba(163,230,53,.9)' : 'rgba(163,230,53,.45)'; g.fill(); g.lineWidth = 2 * dpr; g.strokeStyle = '#0b1a0f'; g.stroke(); });
 }
 function trPos(e){ const r = $('trCv').getBoundingClientRect(), { sx, sy, k } = trView; return [sx + (e.clientX - r.left) / k, sy + (e.clientY - r.top) / k]; }
+const trPts = new Map(); let trPinch = null, trTap = null;
+const trZoom = (f, mx, my) => {   // zoom by f around canvas point (css px) mx,my
+  const v = trView, wx = v.sx + mx / v.k, wy = v.sy + my / v.k, W = lastTrace.cv.width, H = lastTrace.cv.height;
+  let sw = Math.min(W * 1.2, Math.max(v.home.sw * 0.25, v.sw / f)), sh = sw * v.cssH / v.cssW;
+  v.k = v.cssW / sw; v.sw = sw; v.sh = sh; v.sx = wx - mx / v.k; v.sy = wy - my / v.k; drawTrace();
+};
 $('trCv').addEventListener('pointerdown', e => {
+  $('trCv').setPointerCapture(e.pointerId); const r = $('trCv').getBoundingClientRect();
+  trPts.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
+  if (trPts.size === 2){ trDrag = -1; trTap = null; const [p, q] = [...trPts.values()];
+    trPinch = { d:Math.hypot(p[0] - q[0], p[1] - q[1]), m:[(p[0] + q[0]) / 2, (p[1] + q[1]) / 2] }; return; }
   const [x, y] = trPos(e); let bi = -1, bd = Infinity;
   trHandles.forEach(([hx, hy], i) => { const d = Math.hypot(hx - x, hy - y); if (d < bd){ bd = d; bi = i; } });
-  if (bd * trView.k < (trHandles.length > 20 ? 26 : 36)){ trDrag = bi; $('trCv').setPointerCapture(e.pointerId); drawTrace(); }
+  if (bd * trView.k < (trHandles.length > 36 ? 20 : trHandles.length > 20 ? 26 : 36)){ trDrag = bi; trTap = { i:bi, x:e.clientX, y:e.clientY }; drawTrace(); }
+  else trTap = { pan:true, x:e.clientX, y:e.clientY, sx:trView.sx, sy:trView.sy };   // one finger off the points = move the photo
 });
-$('trCv').addEventListener('pointermove', e => { if (trDrag < 0) return; trHandles[trDrag] = trPos(e); drawTrace(); });
-const trEnd = () => { trDrag = -1; if (trView) drawTrace(); };
+$('trCv').addEventListener('pointermove', e => {
+  if (!trPts.has(e.pointerId)) return; const r = $('trCv').getBoundingClientRect(); trPts.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
+  if (trPinch && trPts.size === 2){ const [p, q] = [...trPts.values()], d = Math.hypot(p[0] - q[0], p[1] - q[1]), m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    trView.sx -= (m[0] - trPinch.m[0]) / trView.k; trView.sy -= (m[1] - trPinch.m[1]) / trView.k; trZoom(d / trPinch.d, m[0], m[1]); trPinch = { d, m }; return; }
+  if (trTap && trTap.pan){ trView.sx = trTap.sx - (e.clientX - trTap.x) / trView.k; trView.sy = trTap.sy - (e.clientY - trTap.y) / trView.k; drawTrace(); return; }
+  if (trDrag < 0) return;
+  if (trTap && Math.hypot(e.clientX - trTap.x, e.clientY - trTap.y) > 5) trTap = null;
+  if (!trTap) { trHandles[trDrag] = trPos(e); drawTrace(); }
+});
+const trEnd = e => {
+  trPts.delete(e.pointerId); if (trPts.size < 2) trPinch = null;
+  if (trTap && !trTap.pan && trDrag >= 0 && trMode === 'auto'){ trSharp[trDrag] = !trSharp[trDrag]; }   // tap = sharp ⇄ smooth
+  trTap = null; trDrag = -1; if (trView) drawTrace();
+};
 $('trCv').addEventListener('pointerup', trEnd); $('trCv').addEventListener('pointercancel', trEnd);
+$('trCv').addEventListener('wheel', e => { e.preventDefault(); const r = $('trCv').getBoundingClientRect(); trZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); }, { passive:false });
+$('trZi').addEventListener('click', () => trZoom(1.3, trView.cssW / 2, trView.cssH / 2));
+$('trZo').addEventListener('click', () => trZoom(1 / 1.3, trView.cssW / 2, trView.cssH / 2));
+$('trZf').addEventListener('click', () => { Object.assign(trView, trView.home); trView.k = trView.cssW / trView.sw; drawTrace(); });
+$('trM0').addEventListener('click', () => trSetMode('auto'));
 document.querySelectorAll('#trNp button').forEach(b => b.addEventListener('click', () => trSetN(+b.dataset.n)));
 $('trM1').addEventListener('click', () => trSetMode('corner'));
 $('trM2').addEventListener('click', () => trSetMode('curve'));
@@ -2721,8 +2775,9 @@ $('trOk').addEventListener('click', () => {
   const { cx, cy } = lastTrace;
   // handles → polygon (canonical, y up) with small rounded corners → re-sampled by angle (star-shaped)
   let V = trHandles.map(([x, y]) => [x - cx, cy - y]);
-  let area = 0; V.forEach((p, i) => { const q = V[(i + 1) % V.length]; area += p[0] * q[1] - q[0] * p[1]; }); if (area < 0) V.reverse();
-  const pts = trOutline(V);
+  let area = 0; V.forEach((p, i) => { const q = V[(i + 1) % V.length]; area += p[0] * q[1] - q[0] * p[1]; });
+  const keepS = trSharp; if (area < 0){ V.reverse(); trSharp = trSharp.slice().reverse(); }
+  const pts = trOutline(V); trSharp = keepS;
   let mx = 0, my = 0; pts.forEach(p => { mx += p[0]; my += p[1]; }); mx /= pts.length; my /= pts.length;
   const out = [];
   for (let kk = 0; kk < 180; kk++){
@@ -2765,7 +2820,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 54;
+const APP_V = 55;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
