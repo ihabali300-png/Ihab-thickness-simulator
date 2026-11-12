@@ -908,17 +908,6 @@ function buildEye(eye){
       for (let m = 0; m < th.length; m++){ const d = Math.abs(Math.atan2(Math.sin(t - th[m]), Math.cos(t - th[m]))); if (d < bd){ bd = d; bi = m; } }
       return Math.max(1.2, Math.min(9, customRim[bi] * state.A)); });
     rimAt = raw.map((_, i) => { let sm = 0; for (let q = -3; q <= 3; q++) sm += raw[(i + q + N) % N]; return sm / 7; });
-    if (customEP){
-      // endpiece: temporal points between its top and bottom are pushed out to one vertical face (like the real block)
-      // only where the rim faces the temple (not the top/bottom curve), never more than rim + endpiece, inside the lens height
-      const ext = Math.min(customEP.ext, 0.25) * state.A, xEnd = a + customEP.rim * state.A + ext;
-      const yT = Math.min(customEP.top, 0.95) * b, yB = Math.max(customEP.bot, -0.7) * b, fade = 0.08 * b;
-      for (let i = 0; i < N; i++){
-        const p = C[i], m = Mt[i], L = Math.hypot(m.x, m.y) || 1, nx = m.x * sgnT / L, xt = p.x * sgnT; if (nx < 0.6 || xt < 0) continue;
-        const wgt = Math.min(1, Math.max(0, (Math.min(yT - p.y, p.y - yB) + fade) / fade)); if (!wgt) continue;
-        const need = Math.min((xEnd - xt) / nx, rimAt[i] + ext * 1.15); if (need > rimAt[i]) rimAt[i] += (need - rimAt[i]) * wgt;
-      }
-    }
   }
   const rimBackZ = new Array(N).fill(null);
 
@@ -938,6 +927,19 @@ function buildEye(eye){
       ]);
     }
     group.add(new THREE.Mesh(buildSweep(rows, true, true), frameMat));
+  }
+  // endpiece from the photo: a solid block on the temple side (its own piece, so the rim curve stays clean)
+  let epHinge = null;
+  if (state.showFrame && type === 'plastic' && state.shape === 'custom' && customEP && rimAt){
+    const ext = Math.min(customEP.ext, 0.16) * state.A, rimMM = customEP.rim * state.A;
+    const yT = Math.min(customEP.top, 0.92) * b, yB = Math.max(customEP.bot, -0.6) * b;
+    if (yT - yB > 1.2 && ext > 0.6){
+      let iT0 = 0, bx = -Infinity; for (let i = 0; i < N; i++) if (C[i].y <= yT && C[i].y >= yB && C[i].x * sgnT > bx){ bx = C[i].x * sgnT; iT0 = i; }
+      const x0 = bx + rimMM * 0.35, x1 = bx + rimMM + ext, zF = zf[iT0], D = Math.max(baseD, 2);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, yT - yB, D), frameMat);
+      m.position.set(sgnT * (x0 + x1) / 2, (yT + yB) / 2, zF - D / 2); group.add(m);
+      epHinge = new THREE.Vector3(sgnT * x1, Math.min(yT - 1, Math.max(yB + 1, (yT + yB) / 2)), zF - D / 2);
+    }
   }
 
   if (state.showFrame && type === 'halfrim'){
@@ -974,7 +976,7 @@ function buildEye(eye){
   const mid = i => (zf[i] + zb[i]) / 2;
   const pts = fullRim || type === 'halfrim'
     ? {
-        hinge: P(C[iHinge], rimAt ? nIn + rimAt[iHinge] : nOut, iHinge, zf[iHinge] - Math.max(baseD, 2) * 0.5),
+        hinge: epHinge || P(C[iHinge], rimAt ? nIn + rimAt[iHinge] : nOut, iHinge, zf[iHinge] - Math.max(baseD, 2) * 0.5),
         bridge: P(C[iBridge], fullRim ? nIn + rimW * 0.6 : nOut * 0.6, iBridge, zf[iBridge] - 1.0),
         pad: P(C[iPad], fullRim ? nIn + rimW * 0.5 : 0.1, iPad, (fullRim ? zf[iPad] - baseD * 0.6 : mid(iPad)))
       }
@@ -2643,7 +2645,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 44;
+const APP_V = 45;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
