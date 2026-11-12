@@ -1910,7 +1910,14 @@ function parseRx(raw){
       if (v.length >= 2) LM[m[1]] = v;
     }
     if (LM.S && (LM.C || LM.A) && Math.abs(LM.S[0]) <= 30 && Math.abs(LM.S[1]) <= 30){
-      const leftIsL = /\bTL-?\d|I-?OPTIK/.test(text) || !/\bR\b[^\n]*\bL\b/.test(text);
+      // which panel is which: the eye labels on the screen (L … R / OD … OS / RIGHT … LEFT on one line) decide;
+      // without them, i-Optik/TL screens put L on the left, others usually R on the left
+      let leftIsL = null;
+      for (const l of lines){
+        const w = l.split(/[^A-Z0-9]+/), iR = w.findIndex(x => /^(R|OD|RE|RIGHT)$/.test(x)), iL = w.findIndex(x => /^(L|OS|LE|LEFT)$/.test(x));
+        if (iR >= 0 && iL >= 0){ leftIsL = iL < iR; break; }
+      }
+      if (leftIsL === null) leftIsL = /\bTL-?\d|I-?OPTIK/.test(text);
       const col = i => ({ sph:LM.S[i], cyl:LM.C && Math.abs(LM.C[i]) <= 10 ? LM.C[i] : 0, axis:LM.A && LM.A[i] <= 180 ? LM.A[i] : 0 });
       const a = col(0), b = col(1);
       if (leftIsL){ out.L = a; out.R = b; } else { out.R = a; out.L = b; }
@@ -2321,7 +2328,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 34;
+const APP_V = 35;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
