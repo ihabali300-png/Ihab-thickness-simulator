@@ -1279,6 +1279,7 @@ function renderShapes(){
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
       ${lastPhoto && customPts ? `<button class="sh-edit" id="reTrace">🔄 إعادة القراءة</button>` : ''}
+      ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس العدسة (🧠 ذكاء اصطناعي)</button>` : ''}
       ${customPts ? `<button class="sh ${state.shape === 'custom' ? 'on' : ''}" data-sh="custom" title="من صورة الفريم">${shapeIcon('custom')}</button>` : ''}
       <div class="sh-btns">
         <label class="sh-up">📷 كاميرا<input type="file" id="frameCam" accept="image/*" capture="environment"></label>
@@ -1293,6 +1294,7 @@ function renderShapes(){
   box.querySelectorAll('.sh').forEach(b => b.addEventListener('click', () => { state.shape = b.dataset.sh; renderShapes(); requestRebuild(); armReminders(); }));   // new shape → check B and depth
   const et = $('editTrace'); if (et) et.addEventListener('click', openTraceEditor);
   const rt = $('reTrace'); if (rt) rt.addEventListener('click', reTrace);
+  const at = $('aiTap'); if (at) at.addEventListener('click', aiTapMode);
   ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
   $('shName').textContent = SHAPE_NAME[state.shape] || '';
 }
@@ -1946,6 +1948,63 @@ async function aiRefine(img, f, note){
   f.tr.preview = pc.toDataURL('image/jpeg', 0.85);
   return true;
 }
+/* 👆 Touch-to-select: full-screen photo; tap inside a lens → the AI outlines it (no guess needed).
+   Tap again outside the green line = add that area, inside = remove it. */
+async function aiTapMode(){
+  if (!lastPhoto) return;
+  const img = lastPhoto.img, cv = img.show || img.cv, W = img.cv.width, H = img.cv.height;
+  const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl';
+  ov.innerHTML = `<div id="atMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5">👆 المس جوه العدسة اللي عاوزها</div>
+    <canvas id="atCv" style="touch-action:none;max-width:100vw"></canvas>
+    <div style="display:flex;gap:10px;padding:12px"><button id="atNo" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">إلغاء</button>
+    <button id="atClr" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">↺ من الأول</button>
+    <button id="atOk" disabled style="padding:9px 22px;border-radius:10px;border:0;background:#a3e635;color:#0b1a0f;font-weight:800;opacity:.5">تم ✓ طبّق</button></div>`;
+  document.body.appendChild(ov);
+  const c = ov.querySelector('#atCv'), msg = ov.querySelector('#atMsg'), dpr = Math.min(2, devicePixelRatio || 1);
+  const cssW = Math.min(innerWidth, 700), cssH = Math.min(innerHeight - 140, cssW * H / W), k = Math.min(cssW / W, cssH / H);
+  c.style.width = W * k + 'px'; c.style.height = H * k + 'px'; c.width = W * k * dpr; c.height = H * k * dpr;
+  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false;
+  const draw = () => { g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0); g.drawImage(cv, 0, 0, W, H);
+    if (res){ g.fillStyle = 'rgba(163,230,53,.18)'; g.strokeStyle = '#a3e635'; g.lineWidth = 3 / k; g.beginPath(); res.pts.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.closePath(); g.fill(); g.stroke(); }
+    for (const [x, y] of pos){ g.fillStyle = '#22c55e'; g.beginPath(); g.arc(x * W, y * H, 7 / k, 0, 7); g.fill(); }
+    for (const [x, y] of neg){ g.fillStyle = '#ef4444'; g.beginPath(); g.arc(x * W, y * H, 7 / k, 0, 7); g.fill(); } };
+  draw();
+  const close = () => ov.remove();
+  ov.querySelector('#atNo').onclick = close;
+  ov.querySelector('#atClr').onclick = () => { pos = []; neg = []; res = null; msg.textContent = '👆 المس جوه العدسة اللي عاوزها'; ov.querySelector('#atOk').disabled = true; ov.querySelector('#atOk').style.opacity = .5; draw(); };
+  const inside = (P, x, y) => { let r = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++){ const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) r = !r; } return r; };
+  c.addEventListener('pointerup', async e => {
+    if (busy) return; const r = c.getBoundingClientRect(), x = (e.clientX - r.left) / (W * k), y = (e.clientY - r.top) / (H * k);
+    if (res && inside(res.pts, x * cv.width, y * cv.height)) neg.push([x, y]); else pos.push([x, y]);
+    draw(); busy = true;
+    const A = await aiLoad(msg); if (!A){ msg.textContent = '⚠️ الذكاء الاصطناعي مش متاح دلوقتي — جرّب تاني والنت شغال'; busy = false; return; }
+    msg.textContent = '🧠 بحدد العدسة…'; await new Promise(q => setTimeout(q, 30));
+    try{ res = await A.segmentLens(cv, null, pos, neg); }catch(err){ console.error(err); res = null; }
+    busy = false; draw();
+    if (res){ msg.textContent = 'لو فيه حتة ناقصة المسها، ولو فيه حتة زيادة المسها برضه — وبعدين تم ✓'; const ok = ov.querySelector('#atOk'); ok.disabled = false; ok.style.opacity = 1; }
+    else msg.textContent = 'ملقتش عدسة هنا — المس في نص العدسة';
+  });
+  ov.querySelector('#atOk').onclick = () => {
+    if (!res) return; close();
+    const sx = W / cv.width, sy = H / cv.height, P = res.pts.map(([x, y]) => [x * sx, y * sy]);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+    const pw = (x1 - x0) * 0.12, ph = (y1 - y0) * 0.12, box = { x0:Math.max(0, (x0 - pw) / W), x1:Math.min(1, (x1 + pw) / W), y0:Math.max(0, (y0 - ph) / H), y1:Math.min(1, (y1 + ph) / H) };
+    const mirror = (x0 + x1) / 2 / W < 0.45;   // a lens on the left of the photo is the left lens
+    const tr = traceLens(img, box, { side:mirror ? -1 : 1 }), L = lastTrace;
+    const pts = []; for (let a = 0; a < 180; a++){ const q = P[a * 2]; pts.push([q[0] - L.cx, L.cy - q[1]]); }
+    const t2 = { ...tr, pts, quality:0.99, ai:true };
+    // preview
+    const pc = document.createElement('canvas'), pad = 1.5, px = Math.max(0, L.cx - L.hw * pad), py = Math.max(0, L.cy - L.hh * pad);
+    const sw = Math.min(W - px, L.hw * 2 * pad), sh = Math.min(H - py, L.hh * 2 * pad), sc = 300 / sw; pc.width = 300; pc.height = Math.round(sh * sc);
+    const pg = pc.getContext('2d'); pg.drawImage(cv, px / sx, py / sy, sw / sx, sh / sy, 0, 0, pc.width, pc.height);
+    pg.strokeStyle = '#a3e635'; pg.lineWidth = 3; pg.beginPath(); P.forEach(([x, y], i) => i ? pg.lineTo((x - px) * sc, (y - py) * sc) : pg.moveTo((x - px) * sc, (y - py) * sc)); pg.closePath(); pg.stroke();
+    pg.fillStyle = '#000a'; pg.fillRect(0, 0, 92, 20); pg.fillStyle = '#d9f99d'; pg.font = 'bold 12px sans-serif'; pg.fillText('🧠 AI ✓', 6, 14);
+    t2.preview = pc.toDataURL('image/jpeg', 0.85);
+    lastTrace = { ...L, mirror }; customPreview = t2.preview;
+    lastPhoto = { img, c:[(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2], q:0.99 };
+    useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, 'تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة اللي لمستها — ظبّط A و B بمقاس الذراع');
+  };
+}
 async function traceFrame(file){
   if (!file) return;
   const note = $('shNote');
@@ -1953,7 +2012,8 @@ async function traceFrame(file){
   try{
     const lim = sample ? (typeof sample.limits === 'function' ? await sample.limits() : { images:true }) : null;
     const img = await loadImageData(file);
-    loadImageData(file, 2600).then(h => { trHi = h.cv; }).catch(() => {});   // sharp copy for the manual editor (zoom without blur)
+    loadImageData(file, 2600).then(h => { trHi = h.cv; }).catch(() => {});
+    lastPhoto = { img, c:[0.5, 0.5] }; aiLoad(null);   // touch-to-select available at once; AI warms up in the background   // sharp copy for the manual editor (zoom without blur)
     // 1) offline: find every lens opening in the photo; one frame → apply, several → let the user pick
     note.textContent = '🔎 بدور على الفريمات في الصورة…';
     await new Promise(r => setTimeout(r, 30));
@@ -2925,7 +2985,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 62;
+const APP_V = 63;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');

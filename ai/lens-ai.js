@@ -59,7 +59,9 @@ export async function segmentLens(cv, box, pos = [], neg = [], prior = null){
     }
     if (!area) continue;
     const boxA = (bx1 - bx0) * (bx1 - bx0 > 0 ? (by1 - by0) : 1) / 4, fill = area / boxA, spill = 1 - inBox / area;
-    const s = sc[k] - 0.8 * spill - 0.6 * Math.abs(Math.min(1.2, fill) - 0.8);
+    let s = sc[k] - 0.8 * spill - 0.6 * Math.abs(Math.min(1.2, fill) - 0.8);
+    if (!box){ const fr = area * 4 / (W * H), edge = x0 <= 2 || y0 <= 2 || x1 >= W - 3 || y1 >= H - 3;   // tap mode: a lens is a closed, mid-size region
+      s = sc[k] - (edge ? 0.6 : 0) - (fr > 0.3 ? 0.6 : 0) - (fr < 0.004 ? 0.6 : 0); }
     if (!best || s > best.s) best = { k, s, x0, x1, y0, y1, score:sc[k] };
   }
   if (!best) return null;
