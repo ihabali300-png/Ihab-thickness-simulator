@@ -1817,9 +1817,17 @@ function chooseFrame(frames, title){
 // left lens → our canonical (image-right) orientation: mirror x and keep the 0°…360° sample order
 const mirrorPts = P => { const M = P.length; return P.map((_, m) => { const q = P[(M / 2 - m + M) % M]; return [-q[0], q[1]]; }); };
 const mirrorArr = A => A && A.map((_, m) => A[(A.length / 2 - m + A.length) % A.length]);
+// photo outlines carry pixel noise and hard facets; real lenses are cut smooth with slightly rounded corners
+// (≈1.5–2 mm) → gentle circular smoothing that keeps the overall shape and its straight sides
+function smoothOutline(P){
+  if (!P || P.length < 12) return P; let Q = P;
+  for (let it = 0; it < 3; it++){ const n = Q.length; Q = Q.map((_, i) => { const a = Q[(i - 2 + n) % n], b = Q[(i - 1 + n) % n], c = Q[i], d = Q[(i + 1) % n], e = Q[(i + 2) % n];
+    return [(a[0] + 4 * b[0] + 6 * c[0] + 4 * d[0] + e[0]) / 16, (a[1] + 4 * b[1] + 6 * c[1] + 4 * d[1] + e[1]) / 16]; }); }
+  return Q;
+}
 function useTrace(tr, note){
   setTimeout(armReminders, 0);
-  customPts = tr.pts; customRim = tr.rim || null; customEP = tr.ep || null; state.shape = 'custom';
+  customPts = smoothOutline(tr.pts); customRim = tr.rim || null; customEP = tr.ep || null; state.shape = 'custom';
   if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
   syncUI(); requestRebuild(); renderShapes();
   $('shNote').textContent = note || `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
@@ -1830,7 +1838,7 @@ function useTrace(tr, note){
 let lastPhoto = null;
 const REREAD_FILTERS = ['none', 'saturate(3) contrast(1.8) brightness(0.75)', 'brightness(0.5) contrast(3)', 'grayscale(1) contrast(3.2) brightness(0.7)',
   'contrast(2.4)', 'brightness(0.35) contrast(4)', 'grayscale(1) brightness(0.5) contrast(4.5)', 'saturate(4) brightness(0.6) contrast(2.6)', 'invert(1) grayscale(1) contrast(2.5)'];
-async function reTrace(){
+async function reTrace(opts = {}){
   if (!lastPhoto) return;
   const btn = $('reTrace'), note = $('shNote'), P = lastPhoto, img = P.img, n = REREAD_FILTERS.length;
   if (btn){ btn.disabled = true; btn.style.opacity = .75; }
@@ -1877,7 +1885,7 @@ async function reTrace(){
   }
   prog(n);
   // different-looking reads → let the user pick (thumbnails like the frame chooser); the current shape is option 1
-  if (!P.box && cands.length){
+  if (!opts.auto && !P.box && cands.length){
     const sig = pts => { let mx = 0, my = 0, x0 = 1e9, x1 = -1e9; pts.forEach(p => { mx += p[0]; my += p[1]; x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); }); mx /= pts.length; my /= pts.length;
       const w = (x1 - x0) / 2 || 1, r = []; for (let k = 0; k < 36; k++){ const t = k / 36 * Math.PI * 2; let bd = 9, br = 0;
         pts.forEach(p => { const a = Math.atan2(p[1] - my, p[0] - mx), d = Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))); if (d < bd){ bd = d; br = Math.hypot(p[0] - mx, p[1] - my) / w; } }); r.push(br); } return r; };
@@ -1924,6 +1932,8 @@ async function traceFrame(file){
         if (f.bridge && f.bridge.dbl) state.DBL = snap(state.A * f.bridge.dbl, 0.5, 12, 26);
         useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع${f.tr.quality < 0.9 ? ' — ' + CLEAR_TIP : ''}` : null);
         if (state.frame === 'plastic' && !photoBridge()) $('shNote').textContent += ' — ' + BRIDGE_TIP;
+        // not a crisp, paired read → read it again the deep way right away (9 developments + wider boxes, live %)
+        if (!(f.paired && f.tr.quality >= 0.97)){ renderShapes(); await reTrace({ auto:true }); }
         return;
       }
     }
@@ -2836,7 +2846,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 56;
+const APP_V = 57;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
