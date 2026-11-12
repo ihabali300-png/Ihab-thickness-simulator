@@ -937,24 +937,31 @@ function buildEye(eye){
     let yT = Math.min(customEP.top, 0.85) * b, yB = Math.max(customEP.bot, -0.5) * b;
     const outX = i => { const m = Mt[i], L = Math.hypot(m.x, m.y) || 1; return C[i].x * sgnT + (nIn + rimAt[i]) * m.x * sgnT / L; };
     const vert = []; for (let i = 0; i < N; i++){ const m = Mt[i], L = Math.hypot(m.x, m.y) || 1; if (C[i].x * sgnT > 0 && m.x * sgnT / L > 0.82) vert.push(i); }
-    if (vert.length){ const vy = vert.map(i => C[i].y); yT = Math.min(yT, Math.max(...vy)); yB = Math.max(yB, Math.min(...vy)); }
-    if (yT - yB > 0.45 * b){ const c = (yT + yB) / 2; yT = c + 0.225 * b; yB = c - 0.225 * b; }   // endpieces are short blocks
-    const inRange = []; for (const i of vert) if (C[i].y <= yT && C[i].y >= yB) inRange.push(i);
-    if (vert.length && inRange.length >= 3 && yT - yB > 1.5 && ext > 0.6){
+    // at the height the photo shows; the rim-side edge follows the rim curve, so it stays attached on round lenses too
+    if (yT - yB > 0.45 * b){ const c = Math.min(0.62 * b, (yT + yB) / 2); yT = c + 0.225 * b; yB = c - 0.225 * b; }   // endpieces are short blocks
+    const inRange = []; for (let i = 0; i < N; i++) if (C[i].x * sgnT > 0.3 * a && C[i].y <= yT && C[i].y >= yB) inRange.push(i);
+    if (inRange.length >= 3 && yT - yB > 1.5 && ext > 0.6){
       let xi = Infinity, xo = -Infinity, iT0 = inRange[0]; for (const i of inRange){ const o = outX(i); if (o < xi){ xi = o; iT0 = i; } xo = Math.max(xo, o); }
       // end of the block = measured in the photo from the lens edge to the tip of the endpiece (full width), so its
       // length past the rim's outer face is exactly what the photo shows
-      let xin = -Infinity; for (const i of inRange) xin = Math.max(xin, C[i].x * sgnT);
-      const xTip = customEP.full ? xin + Math.min(customEP.full, 0.45) * state.A : xo + ext;
-      const x0 = xi - Math.max(1.0, rimMM * 0.5), x1 = Math.max(xo + 0.8, xTip), zF = zf[iT0] - 1.0, zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
-      const D = Math.max(1.2, zF - zB0), hgt = yT - yB, len = x1 - x0;
-      const r = Math.min(hgt / 2, len) * 0.6, rIn = Math.min(hgt / 2, 1.2);
+      const xTip = customEP.tip ? customEP.tip * a : xo + ext;   // tip position from the photo (same distance from the lens centre)
+      const x1 = Math.min(xo + 0.16 * state.A, Math.max(xo + 0.8, xTip)), zF = zf[iT0] - 1.0, zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
+      const D = Math.max(1.2, zF - zB0), hgt = yT - yB, r = Math.min(hgt / 2, (x1 - xo)) * 0.6;
+      // outline: the rim side follows the rim's own curve (inside the rim body, never into the lens); top and bottom
+      // flare into the rim with an inverted (concave) curve, like a moulded endpiece; rounded tip
+      const fl = Math.min(0.6 * hgt, 0.35 * b), fx = Math.min(0.45 * (x1 - xo), 2.5);
+      const side = []; for (let i = 0; i < N; i++) if (C[i].x * sgnT > 0 && C[i].y <= yT + fl && C[i].y >= yB - fl) side.push(i);
+      side.sort((p, q) => C[q].y - C[p].y);
+      const rimMid = i => C[i].x * sgnT + Math.max(0.4, rimMM * 0.5);
       const sh = new THREE.Shape(), X = v => sgnT * v;
-      sh.moveTo(X(x0), yB + rIn);
-      sh.quadraticCurveTo(X(x0), yB, X(x0 + rIn), yB);
-      sh.lineTo(X(x1 - r), yB); sh.quadraticCurveTo(X(x1), yB, X(x1), yB + r);
-      sh.lineTo(X(x1), yT - r); sh.quadraticCurveTo(X(x1), yT, X(x1 - r), yT);
-      sh.lineTo(X(x0 + rIn), yT); sh.quadraticCurveTo(X(x0), yT, X(x0), yT - rIn); sh.closePath();
+      const top = side[0], bot = side[side.length - 1];
+      sh.moveTo(X(rimMid(top)), C[top].y);
+      sh.quadraticCurveTo(X(xo), yT, X(xo + fx), yT);
+      sh.lineTo(X(x1 - r), yT); sh.quadraticCurveTo(X(x1), yT, X(x1), yT - r);
+      sh.lineTo(X(x1), yB + r); sh.quadraticCurveTo(X(x1), yB, X(x1 - r), yB);
+      sh.lineTo(X(xo + fx), yB); sh.quadraticCurveTo(X(xo), yB, X(rimMid(bot)), C[bot].y);
+      for (let k = side.length - 2; k > 0; k--){ const i = side[k]; sh.lineTo(X(rimMid(i)), C[i].y); }
+      sh.closePath();
       const bev = Math.min(ch, D * 0.3);
       const geo = new THREE.ExtrudeGeometry(sh, { depth:Math.max(0.2, D - 2 * bev), bevelEnabled:true, bevelThickness:bev, bevelSize:bev * 0.9, bevelSegments:3, curveSegments:10 });
       geo.computeVertexNormals();
@@ -1531,8 +1538,10 @@ function traceLens(img, box, opts = {}){
           }
           if (best){
             const ws = best.map(r => r.w).sort((p, q) => p - q), wm = ws[ws.length >> 1];
+            // tip of the endpiece as an absolute position: distance from the lens centre in half-lens-widths
+            const xc = (qx0 + qx1) / 2, tips = best.map(r => ((r.ex + side * Math.min(r.w, wm * 1.1)) - xc) * side / (Wk / 2)).sort((p, q) => p - q), tip = tips[tips.length >> 1];
             const ext = Math.min(0.3, (wm - base) / Wk);
-            if (ext > 0.03) ep = { top:(best[0].yc - ymid) / hh2, bot:(best[best.length - 1].yc - ymid) / hh2, ext, rim:base / Wk, full:Math.min(0.45, wm / Wk),
+            if (ext > 0.03) ep = { top:(best[0].yc - ymid) / hh2, bot:(best[best.length - 1].yc - ymid) / hh2, ext, rim:base / Wk, full:Math.min(0.45, wm / Wk), tip,
               poly:best.map(r => [[(r.ex + side * base) / k, r.yc / k], [(r.ex + side * Math.min(r.w, wm * 1.15)) / k, r.yc / k]]) };
           }
         }
@@ -1560,7 +1569,7 @@ function traceLens(img, box, opts = {}){
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh, raw:RAW, outer:OUT };
-  return { pts, rim, ep:ep && { top:ep.top, bot:ep.bot, ext:ep.ext, rim:ep.rim, full:ep.full }, epPoly:ep && ep.poly, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
+  return { pts, rim, ep:ep && { top:ep.top, bot:ep.bot, ext:ep.ext, rim:ep.rim, full:ep.full, tip:ep.tip }, epPoly:ep && ep.poly, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
 }
 
 /* Offline lens locator: the user drags a box around ONE lens (finger or mouse); returns normalised {x0,y0,x1,y1}. */
@@ -2668,7 +2677,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 49;
+const APP_V = 50;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
