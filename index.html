@@ -932,13 +932,19 @@ function buildEye(eye){
   let epHinge = null;
   if (state.showFrame && type === 'plastic' && state.shape === 'custom' && customEP && rimAt){
     const ext = Math.min(customEP.ext, 0.16) * state.A, rimMM = customEP.rim * state.A;
-    const yT = Math.min(customEP.top, 0.92) * b, yB = Math.max(customEP.bot, -0.6) * b;
-    if (yT - yB > 1.2 && ext > 0.6){
-      let iT0 = 0, bx = -Infinity; for (let i = 0; i < N; i++) if (C[i].y <= yT && C[i].y >= yB && C[i].x * sgnT > bx){ bx = C[i].x * sgnT; iT0 = i; }
-      // rounded block, same depth and edge chamfer as the rim; starts inside the rim so the seam is hidden
-      const x0 = bx + rimMM * 0.05, x1 = bx + rimMM + ext, zF = zf[iT0] - 1.0, /* 1 mm behind the rim face → looks welded on */ zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
+    // the block only sits where the rim's outer side runs (nearly) vertical, and starts INSIDE the rim at every
+    // height of the block → it always merges into the rim, on round lenses too (no floating "ears")
+    let yT = Math.min(customEP.top, 0.85) * b, yB = Math.max(customEP.bot, -0.5) * b;
+    const outX = i => { const m = Mt[i], L = Math.hypot(m.x, m.y) || 1; return C[i].x * sgnT + (nIn + rimAt[i]) * m.x * sgnT / L; };
+    const vert = []; for (let i = 0; i < N; i++){ const m = Mt[i], L = Math.hypot(m.x, m.y) || 1; if (C[i].x * sgnT > 0 && m.x * sgnT / L > 0.82) vert.push(i); }
+    if (vert.length){ const vy = vert.map(i => C[i].y); yT = Math.min(yT, Math.max(...vy)); yB = Math.max(yB, Math.min(...vy)); }
+    if (yT - yB > 0.45 * b){ const c = (yT + yB) / 2; yT = c + 0.225 * b; yB = c - 0.225 * b; }   // endpieces are short blocks
+    const inRange = []; for (const i of vert) if (C[i].y <= yT && C[i].y >= yB) inRange.push(i);
+    if (vert.length && inRange.length >= 3 && yT - yB > 1.5 && ext > 0.6){
+      let xi = Infinity, xo = -Infinity, iT0 = inRange[0]; for (const i of inRange){ const o = outX(i); if (o < xi){ xi = o; iT0 = i; } xo = Math.max(xo, o); }
+      const x0 = xi - Math.max(1.0, rimMM * 0.5), x1 = xo + ext, zF = zf[iT0] - 1.0, zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
       const D = Math.max(1.2, zF - zB0), hgt = yT - yB, len = x1 - x0;
-      const r = Math.min(hgt / 2, len) * 0.55, rIn = Math.min(hgt / 2, 1.5);   // big round on the temple end, small on the rim side
+      const r = Math.min(hgt / 2, len) * 0.6, rIn = Math.min(hgt / 2, 1.2);
       const sh = new THREE.Shape(), X = v => sgnT * v;
       sh.moveTo(X(x0), yB + rIn);
       sh.quadraticCurveTo(X(x0), yB, X(x0 + rIn), yB);
@@ -949,7 +955,7 @@ function buildEye(eye){
       const geo = new THREE.ExtrudeGeometry(sh, { depth:Math.max(0.2, D - 2 * bev), bevelEnabled:true, bevelThickness:bev, bevelSize:bev * 0.9, bevelSegments:3, curveSegments:10 });
       geo.computeVertexNormals();
       const m = new THREE.Mesh(geo, frameMat); m.position.z = zB0 + bev; group.add(m);
-      epHinge = new THREE.Vector3(sgnT * x1, Math.min(yT - 1, Math.max(yB + 1, (yT + yB) / 2)), zF - D / 2);
+      epHinge = new THREE.Vector3(sgnT * x1, (yT + yB) / 2, zF - D / 2);
     }
   }
 
@@ -2658,7 +2664,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 47;
+const APP_V = 48;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
