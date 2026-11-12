@@ -2018,7 +2018,7 @@ async function aiTapMode(){
     if (V){ V.s = Math.max(k, z * k); V.x = Math.max(0, Math.min(W - W * k / V.s, V.x)); V.y = Math.max(0, Math.min(H - H * k / V.s, V.y)); } };
   let V = null; fit();
   ['touchstart', 'touchmove'].forEach(t => c.addEventListener(t, e => e.preventDefault(), { passive:false }));   // a finger on the photo never scrolls the page
-  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pan', stroke = null, aiOn = false, multi = false, outer = null, shp = null, shDrag = null, shPts = false;   // opens on ✋ (zoom/move) — no stray points
+  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pan', stroke = null, aiOn = false, multi = false, outer = null, shp = null, shDrag = null, shPts = false, shPinch = null;   // opens on ✋ (zoom/move) — no stray points
   V = { x:0, y:0, s:k };   // image px = V.x + css px / V.s  (pinch / ＋ － / ✋ to move)
   const toImg = e => { const r = c.getBoundingClientRect(), sc = W * k / r.width; return [(V.x + (e.clientX - r.left) * sc / V.s) / W, (V.y + (e.clientY - r.top) * sc / V.s) / H]; };   // css size can differ from the drawing size
   const zoom = (f2, mx, my) => { const wx = V.x + mx / V.s, wy = V.y + my / V.s; V.s = Math.max(k, Math.min(k * 8, V.s * f2)); V.x = wx - mx / V.s; V.y = wy - my / V.s;
@@ -2026,7 +2026,7 @@ async function aiTapMode(){
   const tb = () => ov.querySelectorAll('.atB').forEach(b => b.classList.toggle('on', b.dataset.act === act || b.dataset.tool === tool));
   ov.querySelectorAll('.atB').forEach(b => b.onclick = () => { if (b.dataset.act) act = b.dataset.act; if (b.dataset.tool) tool = b.dataset.tool; tb();
     const was = shpRow.style.display; shpRow.style.display = tool === 'shape' ? 'flex' : 'none'; if (was !== shpRow.style.display) fit();
-    if (tool === 'shape'){ if (!busy) msg.textContent = shp ? '⬭ اسحب جوه الشكل تحرّكه — الأطراف: عرض/طول — الزوايا: تكبير متناسب' : '⬭ اختار شكل جاهز قريب من العدسة'; draw(); return; }
+    if (tool === 'shape'){ if (!busy) msg.textContent = shp ? '⬭ جوّه: تحريك — المربعات: مط وتكبير — برّه الزاوية: لف ↻ — بصباعين: تكبير ولف' : '⬭ اختار شكل جاهز قريب من العدسة'; draw(); return; }
     if (tool === 'outer'){ if (!busy) msg.textContent = '⭕ ارسم حد بره العدسة (على الإطار) — التحديد مش هيعدّيه أبداً'; draw(); return; }
     draw();
     if (!busy) msg.textContent = tool === 'draw' ? (act === 'add' ? '✏️ ارسم حوالين الحتة اللي عاوز تضيفها' : '✏️ ارسم حوالين الحتة اللي عاوز تشيلها') : (act === 'add' ? '👆 المس الحتة اللي عاوز تضيفها (نقطة خضرا)' : '👆 المس الحتة اللي عاوز تشيلها (نقطة حمرا)'); });
@@ -2068,18 +2068,17 @@ async function aiTapMode(){
     const [ax, ay] = shW(ocx, ocy), old = { ...shp }; shp.x0 = a0; shp.x1 = a1; shp.y0 = b0; shp.y1 = b1; const [bx, by] = shW(ocx, ocy); shp.x0 += ax - bx; shp.x1 += ax - bx; shp.y0 += ay - by; shp.y1 += ay - by;
     shp.ctrl = A.map(([x, y]) => [(x - a0) / (a1 - a0) * 2 - 1, (y - b0) / (b1 - b0) * 2 - 1]); };
   const shHandles = () => { const { x0, x1, y0, y1 } = shp, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
-    return [['c', x0, y0, x1, y1], ['c', x1, y0, x0, y1], ['c', x1, y1, x0, y0], ['c', x0, y1, x1, y0], ['ex0', x0, ym, x1, ym], ['ex1', x1, ym, x0, ym], ['ey0', xm, y0, xm, y1], ['ey1', xm, y1, xm, y0], ['r', xm, y0 - 34 / V.s]]; };   // [kind, local x, y, anchor x, y]
+    return [['c', x0, y0, x1, y1], ['c', x1, y0, x0, y1], ['c', x1, y1, x0, y0], ['c', x0, y1, x1, y0], ['ex0', x0, ym, x1, ym], ['ex1', x1, ym, x0, ym], ['ey0', xm, y0, xm, y1], ['ey1', xm, y1, xm, y0]]; };   // [kind, local x, y, anchor x, y]
   const shpRow = ov.querySelector('#atShp');
   window.__shH = () => shp && shHandles().map(h => [h[0], (([x, y]) => [x / W, y / H])(shW(h[1], h[2]))]);   // test hook
   shpRow.innerHTML = [['oval', '⬭ بيضاوي'], ['round', '◯ دائري'], ['rect', '▭ مستطيل'], ['square', '▢ مربع'], ['cat', '🐱 كات آي'], ['avi', '💧 أفياتور'], ['pan', '◠ بانتوس']].map(([k2, t]) => `<button class="atS" data-shp="${k2}">${t}</button>`).join('')
-    + '<button class="atS" id="atRl">⟲ لف</button><button class="atS" id="atRr">⟳ لف</button><button class="atS" id="atShFlip">↔ اقلب</button><button class="atS" id="atShPts">⚫ نقطة نقطة</button>';
+    + '<button class="atS" id="atShFlip">↔ اقلب</button><button class="atS" id="atShPts">⚫ نقطة نقطة</button>';
   shpRow.querySelectorAll('[data-shp]').forEach(b => b.onclick = () => {
     let x0, x1, y0, y1; if (res){ const P = res.pts.map(([x, y]) => [x * W / cv.width, y * H / cv.height]); x0 = Math.min(...P.map(p => p[0])); x1 = Math.max(...P.map(p => p[0])); y0 = Math.min(...P.map(p => p[1])); y1 = Math.max(...P.map(p => p[1])); }
     else { const vw = W * k / V.s, vh = H * k / V.s, cx = V.x + vw / 2, cy = V.y + vh / 2, hw = Math.min(vw, vh) * 0.3; x0 = cx - hw; x1 = cx + hw; y0 = cy - hw * (b.dataset.shp === 'round' ? 1 : 0.75); y1 = cy + hw * (b.dataset.shp === 'round' ? 1 : 0.75); }
     if (b.dataset.shp === 'round'){ const m = Math.max(x1 - x0, y1 - y0) / 2, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2; x0 = cx - m; x1 = cx + m; y0 = cy - m; y1 = cy + m; }
     shp = { x0, x1, y0, y1, ctrl:mkShape(b.dataset.shp) }; shpRow.querySelectorAll('[data-shp]').forEach(z => z.classList.toggle('on', z === b)); shApply(); draw();
-    msg.textContent = '⬭ اسحب جوه الشكل تحرّكه — الأطراف: عرض/طول — الزوايا: تكبير متناسب — وبعدين 🧠 أو تم ✓'; });
-  [['#atRl', -3], ['#atRr', 3]].forEach(([id, d]) => shpRow.querySelector(id).onclick = () => { if (!shp) return; shp.rot = (shp.rot || 0) + d * Math.PI / 180; shApply(); draw(); msg.textContent = `⟳ الزاوية ${Math.round((shp.rot || 0) * 180 / Math.PI)}° — أو اسحب الدايرة اللي فوق الشكل`; });
+    msg.textContent = '⬭ جوّه: تحريك — المربعات: مط وتكبير — برّه الزاوية: لف ↻ — بصباعين: تكبير ولف'; });
   shpRow.querySelector('#atShFlip').onclick = () => { if (!shp) return; shp.ctrl = shp.ctrl.map(([u, v]) => [-u, v]); shApply(); draw(); };
   shpRow.querySelector('#atShPts').onclick = e2 => { shPts = !shPts; e2.target.classList.toggle('on', shPts); draw(); };
   // lasso edit (photoshop-like): the drawn closed shape is added to / cut from the current selection
@@ -2098,13 +2097,19 @@ async function aiTapMode(){
   const ptrs = new Map(); let pinch = null, panS = null;
   c.addEventListener('pointerdown', e => { const r = c.getBoundingClientRect(); ptrs.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
     if (ptrs.size >= 2) multi = true;
-    if (ptrs.size === 2){ stroke = null; const [a, b] = [...ptrs.values()]; pinch = { d:Math.hypot(a[0] - b[0], a[1] - b[1]), m:[(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }; }
+    if (ptrs.size === 2){ stroke = null; const [a, b] = [...ptrs.values()], m0 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      if (tool === 'shape' && shp && !busy){ if (shDrag){ shp = shDrag.o; shDrag = null; } const sc = W * k / c.getBoundingClientRect().width, X = V.x + m0[0] * sc / V.s, Y = V.y + m0[1] * sc / V.s, [lx, ly] = shL(X, Y), pd = 60 / V.s;
+        if (lx > shp.x0 - pd && lx < shp.x1 + pd && ly > shp.y0 - pd && ly < shp.y1 + pd){ shPinch = { d:Math.hypot(a[0] - b[0], a[1] - b[1]), an:Math.atan2(b[1] - a[1], b[0] - a[0]), m:m0, o:JSON.parse(JSON.stringify(shp)) }; return; } }
+      pinch = { d:Math.hypot(a[0] - b[0], a[1] - b[1]), m:m0 }; }
     else if (tool === 'pan'){ c.setPointerCapture(e.pointerId); panS = { x:e.clientX, y:e.clientY, vx:V.x, vy:V.y }; } });
   c.addEventListener('pointermove', e => { if (!ptrs.has(e.pointerId)) return; const r = c.getBoundingClientRect(); ptrs.set(e.pointerId, [e.clientX - r.left, e.clientY - r.top]);
+    if (shPinch && ptrs.size === 2){ const [a, b] = [...ptrs.values()], o = shPinch.o, f = Math.max(0.2, Math.hypot(a[0] - b[0], a[1] - b[1]) / shPinch.d), sc = W * k / c.getBoundingClientRect().width;
+      const dx = ((a[0] + b[0]) / 2 - shPinch.m[0]) * sc / V.s, dy = ((a[1] + b[1]) / 2 - shPinch.m[1]) * sc / V.s, cx = (o.x0 + o.x1) / 2 + dx, cy = (o.y0 + o.y1) / 2 + dy, hw = (o.x1 - o.x0) / 2 * f, hh = (o.y1 - o.y0) / 2 * f;
+      shp.x0 = cx - hw; shp.x1 = cx + hw; shp.y0 = cy - hh; shp.y1 = cy + hh; shp.rot = (o.rot || 0) + Math.atan2(b[1] - a[1], b[0] - a[0]) - shPinch.an; draw(); return; }
     if (pinch && ptrs.size === 2){ const [a, b] = [...ptrs.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
       V.x -= (m[0] - pinch.m[0]) / V.s; V.y -= (m[1] - pinch.m[1]) / V.s; zoom(d / pinch.d, m[0], m[1]); pinch = { d, m }; return; }
     if (panS){ V.x = panS.vx - (e.clientX - panS.x) / V.s; V.y = panS.vy - (e.clientY - panS.y) / V.s; zoom(1, 0, 0); } });
-  const endP = e => { ptrs.delete(e.pointerId); if (ptrs.size < 2 && pinch){ pinch = null; stroke = null; e.__pinch = true; } panS = null; };
+  const endP = e => { ptrs.delete(e.pointerId); if (shPinch && ptrs.size < 2){ shPinch = null; shApply(); draw(); } if (ptrs.size < 2 && pinch){ pinch = null; stroke = null; e.__pinch = true; } panS = null; };
   c.addEventListener('pointercancel', endP);
   ov.querySelector('#atZi').onclick = () => zoom(1.4, W * k / 2, H * k / 2);
   ov.querySelector('#atZo').onclick = () => zoom(1 / 1.4, W * k / 2, H * k / 2);
@@ -2116,11 +2121,13 @@ async function aiTapMode(){
     draw(); g.strokeStyle = tool === 'outer' ? '#fb923c' : act === 'add' ? '#22c55e' : '#ef4444'; g.lineWidth = 3 / V.s; g.setLineDash([8 / V.s, 5 / V.s]); g.beginPath();
     stroke.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.stroke(); g.setLineDash([]); });
   c.addEventListener('pointerdown', e => { if (ptrs.size > 1){ if (shDrag){ shp = shDrag.o; shDrag = null; draw(); } return; }
-    if (tool !== 'shape' || !shp || busy) return; const q = toImg(e), X = q[0] * W, Y = q[1] * H, tol = 22 / V.s, o = JSON.parse(JSON.stringify(shp));
+    if (tool !== 'shape' || !shp || busy) return; const q = toImg(e), X = q[0] * W, Y = q[1] * H, tol = 28 / V.s, o = JSON.parse(JSON.stringify(shp));
     c.setPointerCapture(e.pointerId);
     if (shPts){ const A = shAbs(); let bi = -1, bd = tol; A.forEach(([x, y], i) => { const d = Math.hypot(x - X, y - Y); if (d < bd){ bd = d; bi = i; } }); if (bi >= 0){ shDrag = { k:'p', i:bi, o }; return; } }
     for (const h of shHandles()){ const [hx, hy] = shW(h[1], h[2]); if (Math.hypot(hx - X, hy - Y) < tol){ shDrag = { k:h[0], h, o, a0:Math.atan2(Y - shC()[1], X - shC()[0]) }; return; } }
     const [lx, ly] = shL(X, Y); if (lx > shp.x0 && lx < shp.x1 && ly > shp.y0 && ly < shp.y1){ shDrag = { k:'m', X, Y, o }; return; }
+    const out = Math.hypot(Math.max(shp.x0 - lx, 0, lx - shp.x1), Math.max(shp.y0 - ly, 0, ly - shp.y1));
+    if (out < 70 / V.s){ shDrag = { k:'r', o, a0:Math.atan2(Y - shC()[1], X - shC()[0]) }; return; }   // just outside the box = rotate
     panS = { x:e.clientX, y:e.clientY, vx:V.x, vy:V.y }; });
   c.addEventListener('pointermove', e => { if (!shDrag || ptrs.size > 1) return; const q = toImg(e), o = shDrag.o, mn = 20; let X = q[0] * W, Y = q[1] * H;
     if (shDrag.k === 'r'){ const [cx, cy] = shC(); shp.rot = (o.rot || 0) + Math.atan2(Y - cy, X - cx) - shDrag.a0; draw(); msg.textContent = `⟳ الزاوية ${Math.round(shp.rot * 180 / Math.PI)}°`; return; }
@@ -2137,10 +2144,10 @@ async function aiTapMode(){
     if (res){ g.fillStyle = 'rgba(163,230,53,.18)'; g.strokeStyle = '#a3e635'; g.lineWidth = 3 / V.s; g.beginPath(); res.pts.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.closePath(); g.fill(); g.stroke(); }
     if (outer){ g.strokeStyle = '#fb923c'; g.lineWidth = 2.5 / V.s; g.setLineDash([10 / V.s, 6 / V.s]); g.beginPath(); outer.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.closePath(); g.stroke(); g.setLineDash([]); }
     if (shp && tool === 'shape'){ g.strokeStyle = '#38bdf8'; g.lineWidth = 2 / V.s; g.beginPath(); shCurve().forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
-      g.setLineDash([6 / V.s, 5 / V.s]); g.beginPath(); [[shp.x0, shp.y0], [shp.x1, shp.y0], [shp.x1, shp.y1], [shp.x0, shp.y1]].map(([x, y]) => shW(x, y)).forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke(); g.setLineDash([]);
-      const hs = 10 / V.s, top = shW((shp.x0 + shp.x1) / 2, shp.y0); for (const h of shHandles()){ const [x, y] = shW(h[1], h[2]);
-        if (h[0] === 'r'){ g.strokeStyle = '#38bdf8'; g.beginPath(); g.moveTo(top[0], top[1]); g.lineTo(x, y); g.stroke(); g.fillStyle = '#fde047'; g.beginPath(); g.arc(x, y, hs * 1.2, 0, 7); g.fill(); g.fillStyle = '#04121c'; g.font = `${14 / V.s}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('⟳', x, y); continue; }
-        g.fillStyle = h[0] === 'c' ? '#38bdf8' : '#e0f2fe'; g.fillRect(x - hs, y - hs, hs * 2, hs * 2); }
+      g.lineWidth = 1.2 / V.s; g.strokeStyle = '#fff'; g.beginPath(); [[shp.x0, shp.y0], [shp.x1, shp.y0], [shp.x1, shp.y1], [shp.x0, shp.y1]].map(([x, y]) => shW(x, y)).forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
+      const hs = 7 / V.s, [ccx, ccy] = shC(); g.font = `${13 / V.s}px sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      for (const h of shHandles()){ const [x, y] = shW(h[1], h[2]); g.fillStyle = '#fff'; g.strokeStyle = '#111'; g.lineWidth = 1.5 / V.s; g.fillRect(x - hs, y - hs, hs * 2, hs * 2); g.strokeRect(x - hs, y - hs, hs * 2, hs * 2);
+        if (h[0] === 'c'){ const d = Math.hypot(x - ccx, y - ccy), f = 1 + 46 / V.s / d; g.fillStyle = '#ffffffaa'; g.fillText('↻', ccx + (x - ccx) * f, ccy + (y - ccy) * f); } }
       if (shPts) for (const [x, y] of shAbs()){ g.fillStyle = '#fde047'; g.beginPath(); g.arc(x, y, 7 / V.s, 0, 7); g.fill(); } }
     for (const [x, y] of pos){ g.fillStyle = '#22c55e'; g.beginPath(); g.arc(x * W, y * H, 7 / V.s, 0, 7); g.fill(); }
     for (const [x, y] of neg){ g.fillStyle = '#ef4444'; g.beginPath(); g.arc(x * W, y * H, 7 / V.s, 0, 7); g.fill(); } };
@@ -3224,7 +3231,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 72;
+const APP_V = 73;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
