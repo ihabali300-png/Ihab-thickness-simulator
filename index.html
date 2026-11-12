@@ -911,8 +911,8 @@ function buildEye(eye){
     if (customEP){
       // endpiece: temporal points between its top and bottom are pushed out to one vertical face (like the real block)
       // only where the rim faces the temple (not the top/bottom curve), never more than rim + endpiece, inside the lens height
-      const ext = Math.min(customEP.ext, 0.14) * state.A, xEnd = a + customEP.rim * state.A + ext;
-      const yT = Math.min(customEP.top, 0.9) * b, yB = Math.max(customEP.bot, -0.6) * b, fade = 0.15 * b;
+      const ext = Math.min(customEP.ext, 0.25) * state.A, xEnd = a + customEP.rim * state.A + ext;
+      const yT = Math.min(customEP.top, 0.95) * b, yB = Math.max(customEP.bot, -0.7) * b, fade = 0.08 * b;
       for (let i = 0; i < N; i++){
         const p = C[i], m = Mt[i], L = Math.hypot(m.x, m.y) || 1, nx = m.x * sgnT / L, xt = p.x * sgnT; if (nx < 0.6 || xt < 0) continue;
         const wgt = Math.min(1, Math.max(0, (Math.min(yT - p.y, p.y - yB) + fade) / fade)); if (!wgt) continue;
@@ -1477,24 +1477,41 @@ function traceLens(img, box, opts = {}){
     const sr = rim.slice().sort((p, q) => p - q), m = sr[sr.length >> 1];
     if (!(m > 0.015 && m < 0.2)) rim = null;                     // no believable face edge → keep the standard rim
     else {
-      // endpiece (the block on the temple side the hinge sits on): a run of much wider "rim" around the temporal
-      // direction (+x, or −x for a left lens: opts.side = −1). Kept apart from the smooth face and drawn in its own colour.
-      { const raw = rim.slice(), M = raw.length, side = opts.side === -1 ? -1 : 1;
-        let hy0 = Infinity, hy1 = -Infinity; pts.forEach(p => { hy0 = Math.min(hy0, p[1]); hy1 = Math.max(hy1, p[1]); }); const hh2 = (hy1 - hy0) / 2;
-        const isT = i => { const t = Math.atan2(pts[i][1] - my, (pts[i][0] - mx) * side); return Math.abs(t) < 0.9; };
-        let best = null;
-        for (let i = 0; i < M; i++){
-          if (!isT(i) || raw[i] < m * 1.55) continue;
-          let j = i; const run = []; while (isT(j % M) && raw[j % M] >= m * 1.35 && run.length < M){ run.push(j % M); j++; }
-          const sc = run.reduce((s2, q) => s2 + raw[q] - m, 0);
-          if (run.length >= 4 && run.length <= 40 && (!best || sc > best.sc)) best = { run, sc };
-          i = j;
+      // endpiece (the block on the temple side the hinge sits on): walk outward row by row from the inner rim on the
+      // temple side (+x, or −x for a left lens: opts.side = −1) while the pixels are frame-coloured (not background).
+      // Rows where the frame is much wider than the plain rim below form the endpiece; drawn in its own colour.
+      { const side = opts.side === -1 ? -1 : 1, Pk = pts.map(([x, y]) => [x * k, y * k]);
+        let hy0 = Infinity, hy1 = -Infinity, qx0 = Infinity, qx1 = -Infinity; Pk.forEach(p => { hy0 = Math.min(hy0, p[1]); hy1 = Math.max(hy1, p[1]); qx0 = Math.min(qx0, p[0]); qx1 = Math.max(qx1, p[0]); });
+        const hh2 = (hy1 - hy0) / 2, ymid = (hy0 + hy1) / 2, Wk = qx1 - qx0;
+        // background colour: median of the crop border
+        const bs = [[], [], []]; for (let i = 0; i < cw; i += 3) for (const yy of [1, ch - 2]) for (let c = 0; c < 3; c++) bs[c].push(d[(yy * cw + i) * 4 + c]);
+        for (let j = 0; j < ch; j += 3) for (const xx of [1, cw - 2]) for (let c = 0; c < 3; c++) bs[c].push(d[(j * cw + xx) * 4 + c]);
+        const bg = bs.map(v => v.sort((p, q) => p - q)[v.length >> 1]);
+        const isF = (x, y) => { const X = Math.round(x), Y = Math.round(y); if (X < 0 || Y < 0 || X >= cw || Y >= ch) return false; const i = (Y * cw + X) * 4;
+          return Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]) > 42; };
+        const edgeX = yc => { let best = null; for (let i = 0; i < Pk.length; i++){ const p = Pk[i], q = Pk[(i + 1) % Pk.length];
+          if ((p[1] - yc) * (q[1] - yc) > 0 || p[1] === q[1]) continue; const x = p[0] + (q[0] - p[0]) * (yc - p[1]) / (q[1] - p[1]); if (best === null || x * side > best * side) best = x; } return best; };
+        const rows = [];
+        for (let yc = hy1 - 0.02 * hh2; yc > hy0 + 0.02 * hh2; yc -= Math.max(1, hh2 / 60)){
+          const ex = edgeX(yc); if (ex === null) continue;
+          let w = 0, gap = 0; const Xc = cx + ex, Yc = cy - yc;
+          for (let t = 1; t < 0.6 * Wk; t++){ if (isF(Xc + side * t, Yc)){ w = t; gap = 0; } else if (++gap > 3) break; }
+          rows.push({ yc, w, ex });
         }
-        if (best){
-          const ext = Math.min(0.22, Math.max(...best.run.map(q => raw[q])) - m);
-          const ys = best.run.map(q => (pts[q][1] - my) / hh2);
-          if (ext > 0.02) ep = { top:Math.max(...ys), bot:Math.min(...ys), ext, rim:m, poly:best.run.map(q => { const p = pts[q], dx = p[0] - mx, dy = p[1] - my, L0 = Math.hypot(dx, dy) || 1;
-            return [p, [p[0] + dx / L0 * raw[q] * W0, p[1] + dy / L0 * raw[q] * W0]]; }) };
+        const low = rows.filter(r => r.yc < ymid - 0.15 * hh2 && r.yc > ymid - 0.8 * hh2).map(r => r.w).sort((p, q) => p - q);
+        const base = low.length ? low[low.length >> 1] : 0;
+        if (base > 0.015 * Wk){
+          let best = null, cur = [];
+          for (const r of rows.concat([{ w:0 }])){
+            if (r.w > base * 1.6 + 3 && r.yc > ymid - 0.7 * hh2){ cur.push(r); continue; }
+            if (cur.length >= 3 && (!best || cur.length > best.length)) best = cur; cur = [];
+          }
+          if (best){
+            const ws = best.map(r => r.w).sort((p, q) => p - q), wm = ws[ws.length >> 1];
+            const ext = Math.min(0.3, (wm - base) / Wk);
+            if (ext > 0.03) ep = { top:(best[0].yc - ymid) / hh2, bot:(best[best.length - 1].yc - ymid) / hh2, ext, rim:base / Wk,
+              poly:best.map(r => [[(r.ex + side * base) / k, r.yc / k], [(r.ex + side * Math.min(r.w, wm * 1.15)) / k, r.yc / k]]) };
+          }
         }
       }
       rim = rim.map(w => Math.min(m * 1.9, Math.max(m * 0.55, w)));
@@ -2626,7 +2643,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 43;
+const APP_V = 44;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
