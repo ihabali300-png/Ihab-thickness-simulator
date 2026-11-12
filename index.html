@@ -2012,7 +2012,7 @@ async function aiTapMode(){
   c.style.width = W * k + 'px'; c.style.height = H * k + 'px'; c.width = W * k * dpr; c.height = H * k * dpr;
   const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pt', stroke = null, aiOn = false;
   const V = { x:0, y:0, s:k };   // image px = V.x + css px / V.s  (pinch / ＋ － / ✋ to move)
-  const toImg = e => { const r = c.getBoundingClientRect(); return [(V.x + (e.clientX - r.left) / V.s) / W, (V.y + (e.clientY - r.top) / V.s) / H]; };
+  const toImg = e => { const r = c.getBoundingClientRect(), sc = W * k / r.width; return [(V.x + (e.clientX - r.left) * sc / V.s) / W, (V.y + (e.clientY - r.top) * sc / V.s) / H]; };   // css size can differ from the drawing size
   const zoom = (f2, mx, my) => { const wx = V.x + mx / V.s, wy = V.y + my / V.s; V.s = Math.max(k, Math.min(k * 8, V.s * f2)); V.x = wx - mx / V.s; V.y = wy - my / V.s;
     V.x = Math.max(0, Math.min(W - W * k / V.s, V.x)); V.y = Math.max(0, Math.min(H - H * k / V.s, V.y)); draw(); };
   const tb = () => ov.querySelectorAll('.atB').forEach(b => b.classList.toggle('on', b.dataset.act === act || b.dataset.tool === tool));
@@ -2100,7 +2100,7 @@ async function aiTapMode(){
         crop.cv = document.createElement('canvas'); const s3 = Math.min(1, 1024 / Math.max(crop.w, crop.h)) * (cv.width / W);
         crop.k = s3; crop.cv.width = Math.round(crop.w * s3); crop.cv.height = Math.round(crop.h * s3);
         crop.cv.getContext('2d').drawImage(cv, crop.x * cv.width / W, crop.y * cv.height / H, crop.w * cv.width / W, crop.h * cv.height / H, 0, 0, crop.cv.width, crop.cv.height);
-        crop.prior = pr; crop.n = pos.length;
+        crop.prior = pr; crop.n = pos.length; crop.drawn = !!(res && res.drawn);
       }
       const toC = ([x, y]) => [(x * W - crop.x) / crop.w, (y * H - crop.y) / crop.h];
       const prC = crop.prior.map(([x, y]) => [(x - crop.x) * crop.k, (y - crop.y) * crop.k]);
@@ -2108,7 +2108,7 @@ async function aiTapMode(){
       const hintIn = [], hintOut = [];
       for (let i = 0; i < 8; i++){ const p = prC[Math.round(i * prC.length / 8) % prC.length]; hintIn.push([(mx + (p[0] - mx) * 0.5) / crop.cv.width, (my + (p[1] - my) * 0.5) / crop.cv.height]); }
       for (let i = 0; i < 12; i++){ const p = prC[Math.round(i * prC.length / 12) % prC.length]; hintOut.push([(mx + (p[0] - mx) * 1.12) / crop.cv.width, (my + (p[1] - my) * 1.12) / crop.cv.height]); }
-      const r2 = await A.segmentLens(crop.cv, null, pos.map(toC).concat(hintIn), neg.map(toC).concat(hintOut), prC);
+      const r2 = await A.segmentLens(crop.cv, null, pos.map(toC).concat(hintIn), neg.map(toC).concat(hintOut), prC, crop.drawn ? { lo:0.92, hi:1.04 } : null);   // your drawing is the boss: the AI only snaps it to the edge
       res = r2 && { ...r2, pts:r2.pts.map(([x, y]) => [(x / crop.k + crop.x) * cv.width / W, (y / crop.k + crop.y) * cv.height / H]) };
     }catch(err){ console.error(err); res = null; }
     clearInterval(tick); if (!(crop && crop.n === pos.length && performance.now() - t0 < 2500)) window.__aiDur = performance.now() - t0;
@@ -3129,7 +3129,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 68;
+const APP_V = 69;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');

@@ -32,7 +32,7 @@ async function embed(cv){
 }
 
 /* box: {x0,y0,x1,y1} 0..1 (search area), pos: [[x,y]] 0..1 inside the lens, neg: [[x,y]] 0..1 on the frame/background */
-export async function segmentLens(cv, box, pos = [], neg = [], prior = null){
+export async function segmentLens(cv, box, pos = [], neg = [], prior = null, lim = null){
   await loadAI();
   const { emb, inp } = await embed(cv);
   const [rh, rw] = inp.reshaped_input_sizes[0];
@@ -60,7 +60,9 @@ export async function segmentLens(cv, box, pos = [], neg = [], prior = null){
     if (!area) continue;
     const boxA = (bx1 - bx0) * (bx1 - bx0 > 0 ? (by1 - by0) : 1) / 4, fill = area / boxA, spill = 1 - inBox / area;
     let s = sc[k] - 0.8 * spill - 0.6 * Math.abs(Math.min(1.2, fill) - 0.8);
-    if (!box){ const fr = area * 4 / (W * H), edge = x0 <= 2 || y0 <= 2 || x1 >= W - 3 || y1 >= H - 3;   // tap mode: a lens is a closed, mid-size region
+    if (prior){ let pa = 0; for (let i = 0; i < prior.length; i++){ const a = prior[i], b = prior[(i + 1) % prior.length]; pa += a[0] * b[1] - b[0] * a[1]; }
+      pa = Math.abs(pa) / 2 * (W / cv.width) * (H / cv.height); const ra = area * 4 / (pa || 1); s = sc[k] - 1.5 * Math.abs(Math.log(Math.max(0.05, ra))); }
+    else if (!box){ const fr = area * 4 / (W * H), edge = x0 <= 2 || y0 <= 2 || x1 >= W - 3 || y1 >= H - 3;   // tap mode: a lens is a closed, mid-size region
       s = sc[k] - (edge ? 0.6 : 0) - (fr > 0.3 ? 0.6 : 0) - (fr < 0.004 ? 0.6 : 0); }
     if (!best || s > best.s) best = { k, s, x0, x1, y0, y1, score:sc[k] };
   }
@@ -75,9 +77,9 @@ export async function segmentLens(cv, box, pos = [], neg = [], prior = null){
   const pr = t => { let bd = 9, br = 0; for (const p of prior){ const a = Math.atan2(cy - p[1], p[0] - cx), d = Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))); if (d < bd){ bd = d; br = Math.hypot(p[0] - cx, p[1] - cy); } } return br; };
   const Rall = Math.hypot(best.x1 - best.x0, best.y1 - best.y0) * 0.6, rr = new Float32Array(360), used = new Uint8Array(360);
   for (let a = 0; a < 360; a++){
-    const t = a / 360 * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t), p0 = prior ? pr(t) : 0, R = prior ? p0 * 1.12 : Rall;
+    const t = a / 360 * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t), p0 = prior ? pr(t) : 0, R = prior ? p0 * (lim ? lim.hi : 1.12) : Rall;
     let last = 0; for (let s = 0; s < R; s += 0.5) if (at((cx + ux * s) * sx, (cy + uy * s) * sy)) last = s;
-    if (prior && last < p0 * 0.8){ rr[a] = p0; } else { rr[a] = last; used[a] = 1; }
+    if (prior && last < p0 * (lim ? lim.lo : 0.8)){ rr[a] = p0; } else { rr[a] = last; used[a] = 1; }
   }
   const med = Array.from(rr, (_, a) => { const w = []; for (let q = -6; q <= 6; q++) w.push(rr[(a + q + 360) % 360]); w.sort((p, q) => p - q); return w[6]; });
   const pts = med.map((r, a) => { const t = a / 360 * Math.PI * 2; return [cx + Math.cos(t) * r, cy - Math.sin(t) * r]; });
