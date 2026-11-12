@@ -935,9 +935,20 @@ function buildEye(eye){
     const yT = Math.min(customEP.top, 0.92) * b, yB = Math.max(customEP.bot, -0.6) * b;
     if (yT - yB > 1.2 && ext > 0.6){
       let iT0 = 0, bx = -Infinity; for (let i = 0; i < N; i++) if (C[i].y <= yT && C[i].y >= yB && C[i].x * sgnT > bx){ bx = C[i].x * sgnT; iT0 = i; }
-      const x0 = bx + rimMM * 0.35, x1 = bx + rimMM + ext, zF = zf[iT0], D = Math.max(baseD, 2);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, yT - yB, D), frameMat);
-      m.position.set(sgnT * (x0 + x1) / 2, (yT + yB) / 2, zF - D / 2); group.add(m);
+      // rounded block, same depth and edge chamfer as the rim; starts inside the rim so the seam is hidden
+      const x0 = bx + rimMM * 0.15, x1 = bx + rimMM + ext, zF = zf[iT0], zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
+      const D = Math.max(1.2, zF - zB0), hgt = yT - yB, len = x1 - x0;
+      const r = Math.min(hgt / 2, len) * 0.55, rIn = Math.min(hgt / 2, 1.5);   // big round on the temple end, small on the rim side
+      const sh = new THREE.Shape(), X = v => sgnT * v;
+      sh.moveTo(X(x0), yB + rIn);
+      sh.quadraticCurveTo(X(x0), yB, X(x0 + rIn), yB);
+      sh.lineTo(X(x1 - r), yB); sh.quadraticCurveTo(X(x1), yB, X(x1), yB + r);
+      sh.lineTo(X(x1), yT - r); sh.quadraticCurveTo(X(x1), yT, X(x1 - r), yT);
+      sh.lineTo(X(x0 + rIn), yT); sh.quadraticCurveTo(X(x0), yT, X(x0), yT - rIn); sh.closePath();
+      const bev = Math.min(ch, D * 0.3);
+      const geo = new THREE.ExtrudeGeometry(sh, { depth:Math.max(0.2, D - 2 * bev), bevelEnabled:true, bevelThickness:bev, bevelSize:bev * 0.9, bevelSegments:3, curveSegments:10 });
+      geo.computeVertexNormals();
+      const m = new THREE.Mesh(geo, frameMat); m.position.z = zB0 + bev; group.add(m);
       epHinge = new THREE.Vector3(sgnT * x1, Math.min(yT - 1, Math.max(yB + 1, (yT + yB) / 2)), zF - D / 2);
     }
   }
@@ -2645,7 +2656,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 45;
+const APP_V = 46;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
