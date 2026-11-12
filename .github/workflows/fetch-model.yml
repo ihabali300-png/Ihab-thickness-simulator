@@ -1,0 +1,26 @@
+name: fetch-ai-model
+on:
+  push:
+    paths: ['.github/fetch-model.txt']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: download SlimSAM (offline lens segmentation)
+        run: |
+          set -e
+          M=Xenova/slimsam-77-uniform; D=models/$M
+          mkdir -p $D/onnx
+          for f in config.json preprocessor_config.json onnx/vision_encoder_quantized.onnx onnx/prompt_encoder_mask_decoder_quantized.onnx; do
+            curl -fL --retry 3 -o $D/$f https://huggingface.co/$M/resolve/main/$f
+          done
+          ls -la $D $D/onnx
+      - name: commit
+        run: |
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git add models; git commit -m "Add SlimSAM model files" || echo nothing
+          git push
