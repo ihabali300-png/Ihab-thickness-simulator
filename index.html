@@ -945,7 +945,8 @@ function buildEye(eye){
       // end of the block = measured in the photo from the lens edge to the tip of the endpiece (full width), so its
       // length past the rim's outer face is exactly what the photo shows
       const xTip = customEP.tip ? customEP.tip * a : xo + ext;   // tip position from the photo (same distance from the lens centre)
-      const x1 = Math.min(xo + 0.16 * state.A, Math.max(xo + 0.8, xTip)), zF = zf[iT0] - 1.0, zB0 = rimBackZ[iT0] !== null ? rimBackZ[iT0] : zF - Math.max(baseD, 2);
+      const x1 = Math.min(xo + 0.16 * state.A, Math.max(xo + 0.8, xTip)), zF = Math.min(...inRange.map(i => zf[i])) - 1.0,
+        zB0 = Math.max(...inRange.map(i => rimBackZ[i] !== null ? rimBackZ[i] : zf[i] - Math.max(baseD, 2))) + 0.5;   // stays inside the rim's depth: never sticks out at the back (wrap curve included)
       const D = Math.max(1.2, zF - zB0), hgt = yT - yB, r = Math.min(hgt / 2, (x1 - xo)) * 0.6;
       // outline: the rim side follows the rim's own curve (inside the rim body, never into the lens); top and bottom
       // flare into the rim with an inverted (concave) curve, like a moulded endpiece; rounded tip
@@ -1563,7 +1564,7 @@ function traceLens(img, box, opts = {}){
   // preview crop with the traced outline
   const pv = document.createElement('canvas'); const ps = 1.6, px0 = Math.max(0, icx - bhw * ps), py0 = Math.max(0, icy - bhh * ps), pw = Math.min(W - px0, bhw * 2 * ps), ph = Math.min(H - py0, bhh * 2 * ps);
   const sc = 150 / Math.max(pw, ph); pv.width = Math.round(pw * sc); pv.height = Math.round(ph * sc);
-  const pc = pv.getContext('2d'); pc.drawImage(cv, px0, py0, pw, ph, 0, 0, pv.width, pv.height);
+  const pc = pv.getContext('2d'); pc.drawImage(img.show || cv, px0, py0, pw, ph, 0, 0, pv.width, pv.height);
   pc.strokeStyle = '#a3e635'; pc.lineWidth = 2; pc.beginPath();
   pts.forEach(([x, y], i) => { const X = (icx + x - px0) * sc, Y = (icy - y - py0) * sc; i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); });
   pc.closePath(); pc.stroke();
@@ -1575,7 +1576,7 @@ function traceLens(img, box, opts = {}){
     OUT.forEach(([x, y], i) => { const X = (icx + x - px0) * sc, Y = (icy - y - py0) * sc; i ? pc.lineTo(X, Y) : pc.moveTo(X, Y); }); pc.closePath(); pc.stroke(); pc.setLineDash([]); }
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
   for (const [x, y] of pts){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-  lastTrace = { cv, cx:icx, cy:icy, hw:bhw, hh:bhh, raw:RAW, outer:OUT };
+  lastTrace = { cv:img.show || cv, cx:icx, cy:icy, hw:bhw, hh:bhh, raw:RAW, outer:OUT };
   return { pts, rim, ep:ep && { top:ep.top, bot:ep.bot, ext:ep.ext, rim:ep.rim, full:ep.full, tip:ep.tip }, epPoly:ep && ep.poly, quality, corners:corners.length >= 3 ? corners.length : 0, aspect:(x1 - x0) / (y1 - y0), preview:pv.toDataURL('image/jpeg', 0.85) };
 }
 
@@ -1688,6 +1689,24 @@ function findLensBoxes(img, opts = {}){
   });
 }
 
+/* Clear / pale frames: the photo is re-developed a few ways (darker exposure, strong contrast, black & white,
+   boosted colour) and traced again; the version with the clearest, best-paired lenses wins. The preview and the
+   editor keep showing the original photo. */
+function photoVariant(img, filter){
+  const cv = document.createElement('canvas'); cv.width = img.cv.width; cv.height = img.cv.height;
+  const ctx = cv.getContext('2d', { willReadFrequently:true }); ctx.filter = filter; ctx.drawImage(img.cv, 0, 0); ctx.filter = 'none';
+  return { cv, ctx, data:ctx.getImageData(0, 0, cv.width, cv.height), show:img.cv, variant:filter };
+}
+function findFrames(img){
+  const score = F => F.length ? F.reduce((s, f) => s + f.tr.quality + (f.paired ? 0.6 : 0) + (f.tr.ep ? 0.05 : 0) + (f.bridge && f.bridge.top !== undefined ? 0.05 : 0), 0) / Math.max(1, F.length) + Math.min(F.length, 3) * 0.02 : 0;
+  let best = findFramesOne(img), bs = score(best);
+  if (best.length && best.every(f => f.paired && f.tr.quality >= 0.97)) return best;
+  for (const flt of ['saturate(3) contrast(1.8) brightness(0.75)', 'brightness(0.5) contrast(3)', 'grayscale(1) contrast(3.2) brightness(0.7)', 'contrast(2.4)']){
+    let F = []; try{ F = findFramesOne(photoVariant(img, flt)); }catch(e){ console.error(e); }
+    const sc = score(F); if (sc > bs + 0.02){ best = F; bs = sc; }
+  }
+  return best;
+}
 /* Bridge between the two lenses of one frame: DBL (gap between the inner nasal edges, as a share of the lens width)
    and the bridge's top / bottom (in half-lens-heights from the lens centre, y up), read in a few columns of the gap
    as the run of frame-coloured pixels that starts at the frame's top edge. */
@@ -1719,7 +1738,7 @@ function measureBridge(img, left, right){
 }
 /* All lens openings in the photo, traced and grouped per frame: [{ tr, last, box, mirror }] — one entry per frame
    (its image-RIGHT lens = our canonical side; if only the left lens traced well, it is mirrored). */
-function findFrames(img){
+function findFramesOne(img){
   const iou = (a, b) => { const ix = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)), iy = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
     const I = ix * iy, U = (a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - I; return U > 0 ? I / U : 0; };
   let boxes = [];
@@ -2684,7 +2703,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 51;
+const APP_V = 52;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
