@@ -1891,6 +1891,34 @@ function parseRx(raw){
     return r;
   };
 
+  // D) lensmeter screen photo (i-Optik TL-6800 & co): rows "S -0.75 … S -0.50", "C …", "A …" = two side-by-side panels.
+  //    OCR splits "- 0.75", drops dots ("025", "05") and adds junk (€ ™ |). Panel order: i-Optik shows L on the left.
+  {
+    const LM = {};
+    for (const l0 of lines){
+      const l = l0.replace(/^[^A-Z0-9]+/, '');
+      const m = l.match(/^([SCA])[A-Z]?(?=[\s\-+:]|$)(.*)$/); if (!m || LM[m[1]]) continue;
+      const body = m[2].replace(/[^0-9.+\- ]/g, ' ').replace(/([+-])\s+(?=\d)/g, '$1');
+      let v = [...body.matchAll(/([+-]?)(\d+(?:\.\d+)?)/g)].map(([, s, d]) => {
+        if (m[1] === 'A') return +d <= 180 ? { x:Math.round(+d), ok:true } : null;
+        const ok = d.includes('.') || /^0\d+$/.test(d) || (+d >= 100 && +d % 25 === 0);
+        let x = d.includes('.') ? +d : /^0\d+$/.test(d) ? +('0.' + d.slice(1)) : (+d >= 100 && +d % 25 === 0) ? +d / 100 : +d;
+        return { x:s === '-' ? -x : x, ok };
+      }).filter(Boolean);
+      if (v.filter(q => q.ok).length >= 2) v = v.filter(q => q.ok);      // stray single digits from screen glare
+      v = v.map(q => q.x);
+      if (v.length >= 2) LM[m[1]] = v;
+    }
+    if (LM.S && (LM.C || LM.A) && Math.abs(LM.S[0]) <= 30 && Math.abs(LM.S[1]) <= 30){
+      const leftIsL = /\bTL-?\d|I-?OPTIK/.test(text) || !/\bR\b[^\n]*\bL\b/.test(text);
+      const col = i => ({ sph:LM.S[i], cyl:LM.C && Math.abs(LM.C[i]) <= 10 ? LM.C[i] : 0, axis:LM.A && LM.A[i] <= 180 ? LM.A[i] : 0 });
+      const a = col(0), b = col(1);
+      if (leftIsL){ out.L = a; out.R = b; } else { out.R = a; out.L = b; }
+      for (const e of ['R', 'L']) if (!out[e].cyl) out[e].axis = 0;
+      out.lensmeter = true;
+      return out;
+    }
+  }
   // A) one row per eye
   for (const l of lines){
     if (/\bNEAR\b|\bREADING\b|\bINT\b/.test(l) && !/\bDIST/.test(l)) continue;
@@ -2044,7 +2072,7 @@ async function runOCR(file){
       const { data } = await worker.recognize(cv, {}, { text:true, blocks:true });
       let t = data.text; try{ t = rebuildWithSigns(data, cv) || data.text; }catch(e){ console.error(e); }
       const rx = parseRx(t);
-      const val = e => e ? (e.sph ? 1 : 0) + (e.cyl ? 1 : 0) + (e.axis ? 1 : 0) : 0;
+      const val = e => e ? (e.sph ? 1 : 0) + (e.cyl ? 1 : 0) + (e.axis ? 1 : 0) - (e.cyl && !e.axis ? 2 : 0) : 0;   // cyl without axis = incomplete
       return { t, rx, score:(rx.R ? 10 : 0) + (rx.L ? 10 : 0) + val(rx.R) + val(rx.L) };
     };
     let best = null;
@@ -2060,10 +2088,15 @@ async function runOCR(file){
       if (runs.length > 2) best = { ...best, rx:voteRx(runs.map(r => r.rx)) };
     }
     if (!best || best.score < 24){
+      const extra = [];
       for (const m of ['A', 'B']){
         st.textContent = '🔎 بجرب قراءة تانية أوضح…';
-        const r = await pass(m); if (!best || r.score > best.score) best = r;
+        const r = await pass(m); extra.push(r); if (!best || r.score > best.score) best = r;
         if (best.score >= 24) break;
+      }
+      // a value one read missed (often the axis row) is taken from another read of the same eye
+      for (const e of ['R', 'L']) if (best.rx[e] && best.rx[e].cyl && !best.rx[e].axis){
+        const o = extra.find(r => r.rx[e] && r.rx[e].cyl === best.rx[e].cyl && r.rx[e].axis); if (o) best.rx[e].axis = o.rx[e].axis;
       }
     }
     await worker.terminate();
@@ -2288,7 +2321,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 33;
+const APP_V = 34;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
