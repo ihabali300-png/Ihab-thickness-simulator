@@ -1514,20 +1514,27 @@ function traceLens(img, box, opts = {}){
         let hy0 = Infinity, hy1 = -Infinity, qx0 = Infinity, qx1 = -Infinity; Pk.forEach(p => { hy0 = Math.min(hy0, p[1]); hy1 = Math.max(hy1, p[1]); qx0 = Math.min(qx0, p[0]); qx1 = Math.max(qx1, p[0]); });
         const hh2 = (hy1 - hy0) / 2, ymid = (hy0 + hy1) / 2, Wk = qx1 - qx0;
         // background colour: median of the crop border
-        const bs = [[], [], []]; for (let i = 0; i < cw; i += 3) for (const yy of [1, ch - 2]) for (let c = 0; c < 3; c++) bs[c].push(d[(yy * cw + i) * 4 + c]);
-        for (let j = 0; j < ch; j += 3) for (const xx of [1, cw - 2]) for (let c = 0; c < 3; c++) bs[c].push(d[(j * cw + xx) * 4 + c]);
+        // background colour: what shows through the lens near its edge (the same wall / shelf the frame stands on;
+        // the crop border can fall outside the photo and be plain grey)
+        const bs = [[], [], []]; for (let i = 0; i < Pk.length; i += 2) for (const f of [0.78, 0.86]){ const X = Math.round(cx + Pk[i][0] * f), Y = Math.round(cy - Pk[i][1] * f);
+          if (X < 0 || Y < 0 || X >= cw || Y >= ch) continue; for (let c = 0; c < 3; c++) bs[c].push(d[(Y * cw + X) * 4 + c]); }
         const bg = bs.map(v => v.sort((p, q) => p - q)[v.length >> 1]);
-        const isF = (x, y) => { const X = Math.round(x), Y = Math.round(y); if (X < 0 || Y < 0 || X >= cw || Y >= ch) return false; const i = (Y * cw + X) * 4;
-          return Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]) > 42; };
+        // frame colour vs background: threshold adapts to the frame (pale translucent acetate is close to the wall colour)
+        const dist = (X, Y) => { X = Math.round(X); Y = Math.round(Y); if (X < 0 || Y < 0 || X >= cw || Y >= ch) return 0; const i = (Y * cw + X) * 4; return Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]); };
+        let thrF = 42;
+        { const ds = []; for (let i = 0; i < Pk.length; i += 3){ const p = Pk[i], L0 = Math.hypot(p[0], p[1]) || 1; for (const t of [2, 3, 4]) ds.push(dist(cx + p[0] + p[0] / L0 * t, cy - p[1] - p[1] / L0 * t)); }
+          ds.sort((p, q) => p - q); const rc = ds[ds.length >> 1]; thrF = Math.max(14, Math.min(42, rc * 0.5)); }
+        const isF = (x, y) => dist(x, y) > thrF;
         const edgeX = yc => { let best = null; for (let i = 0; i < Pk.length; i++){ const p = Pk[i], q = Pk[(i + 1) % Pk.length];
           if ((p[1] - yc) * (q[1] - yc) > 0 || p[1] === q[1]) continue; const x = p[0] + (q[0] - p[0]) * (yc - p[1]) / (q[1] - p[1]); if (best === null || x * side > best * side) best = x; } return best; };
         const rows = [];
         for (let yc = hy1 - 0.02 * hh2; yc > hy0 + 0.02 * hh2; yc -= Math.max(1, hh2 / 60)){
           const ex = edgeX(yc); if (ex === null) continue;
           let w = 0, gap = 0; const Xc = cx + ex, Yc = cy - yc;
-          for (let t = 1; t < 0.6 * Wk; t++){ if (isF(Xc + side * t, Yc)){ w = t; gap = 0; } else if (++gap > 3) break; }
+          for (let t = 1; t < 0.32 * Wk; t++){ if (isF(Xc + side * t, Yc)){ w = t; gap = 0; } else if (++gap > 3) break; }   // the temple running on beyond the endpiece is cut off
           rows.push({ yc, w, ex });
         }
+        if (opts.debug) opts.debug.rows = rows.map(r => [+(((r.yc - ymid) / hh2).toFixed(2)), r.w]), opts.debug.Wk = Wk, opts.debug.thr = thrF;
         const low = rows.filter(r => r.yc < ymid - 0.15 * hh2 && r.yc > ymid - 0.8 * hh2).map(r => r.w).sort((p, q) => p - q);
         const base = low.length ? low[low.length >> 1] : 0;
         if (base > 0.015 * Wk){
@@ -2677,7 +2684,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 50;
+const APP_V = 51;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
