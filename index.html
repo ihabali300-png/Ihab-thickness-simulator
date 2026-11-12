@@ -1990,35 +1990,86 @@ function tapPrior(img, tx, ty){
 async function aiTapMode(){
   if (!lastPhoto) return;
   const img = lastPhoto.img, cv = img.show || img.cv, W = img.cv.width, H = img.cv.height;
-  const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl';
+  const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl;overflow-y:auto';
   ov.innerHTML = `<div id="atMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5">✋ قرّب وحرّك براحتك — وبعدين اختار 👆 نقط أو ✏️ رسم، وفي الآخر شغّل 🧠</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding:0 8px 8px">
       <button class="atB" data-act="add" style="--c:#22c55e">➕ إضافة</button><button class="atB" data-act="del" style="--c:#ef4444">➖ إزالة</button>
       <span style="width:10px"></span>
       <button class="atB" data-tool="pt" style="--c:#a3e635">👆 نقط</button><button class="atB" data-tool="draw" style="--c:#a3e635">✏️ رسم</button><button class="atB" data-tool="pan" style="--c:#a3e635">✋ تحريك</button>
+      <button class="atB" data-tool="outer" style="--c:#fb923c">⭕ حد خارجي</button><button class="atB" data-tool="shape" style="--c:#38bdf8">⬭ أشكال</button>
     </div>
+    <div id="atShp" style="display:none;gap:6px;flex-wrap:wrap;justify-content:center;padding:0 8px 8px"></div>
     <div style="display:flex;gap:8px;justify-content:center;padding:0 8px 8px">
       <button id="atAI" class="atB" style="--c:#c084fc;min-width:120px">🧠 ذكاء: مطفي</button>
-      <button class="atB" id="atZo">－</button><button class="atB" id="atZf">⤢</button><button class="atB" id="atZi">＋</button>
+      <button class="atB" id="atSm">✨ نعّم</button><button class="atB" id="atZo">－</button><button class="atB" id="atZf">⤢</button><button class="atB" id="atZi">＋</button>
     </div>
-    <style>.atB{padding:7px 12px;border-radius:10px;border:1px solid #a3e63555;background:#030a05;color:#ecfccb;font-size:13px}.atB.on{background:var(--c);border-color:var(--c);color:#0b1a0f;font-weight:800}</style>
+    <style>.atB{padding:7px 12px;border-radius:10px;border:1px solid #a3e63555;background:#030a05;color:#ecfccb;font-size:13px}.atB.on{background:var(--c);border-color:var(--c);color:#0b1a0f;font-weight:800}.atS{padding:5px 10px;border-radius:9px;border:1px solid #38bdf866;background:#031018;color:#e0f2fe;font-size:12px}.atS.on{background:#38bdf8;color:#04121c;font-weight:800}</style>
     <canvas id="atCv" style="touch-action:none;max-width:100vw"></canvas>
     <div style="display:flex;gap:10px;padding:12px"><button id="atNo" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">إلغاء</button>
     <button id="atClr" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">↺ من الأول</button>
     <button id="atOk" disabled style="padding:9px 22px;border-radius:10px;border:0;background:#a3e635;color:#0b1a0f;font-weight:800;opacity:.5">تم ✓ طبّق</button></div>`;
   document.body.appendChild(ov);
   const c = ov.querySelector('#atCv'), msg = ov.querySelector('#atMsg'), dpr = Math.min(2, devicePixelRatio || 1);
-  const cssW = Math.min(innerWidth, 700), cssH = Math.min(innerHeight - 140, cssW * H / W), k = Math.min(cssW / W, cssH / H);
+  // the photo takes only the space left between the toolbars and the bottom buttons (تم ✓ always on screen)
+  const topY = c.getBoundingClientRect().top + 46, cssW = Math.min(innerWidth, 700), cssH = Math.min(Math.max(220, innerHeight - topY - 70), cssW * H / W), k = Math.min(cssW / W, cssH / H);
   c.style.width = W * k + 'px'; c.style.height = H * k + 'px'; c.width = W * k * dpr; c.height = H * k * dpr;
-  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pan', stroke = null, aiOn = false, multi = false;   // opens on ✋ (zoom/move) — no stray points
+  const g = c.getContext('2d'); let pos = [], neg = [], res = null, busy = false, crop = null, act = 'add', tool = 'pan', stroke = null, aiOn = false, multi = false, outer = null, shp = null, shDrag = null, shPts = false;   // opens on ✋ (zoom/move) — no stray points
   const V = { x:0, y:0, s:k };   // image px = V.x + css px / V.s  (pinch / ＋ － / ✋ to move)
   const toImg = e => { const r = c.getBoundingClientRect(), sc = W * k / r.width; return [(V.x + (e.clientX - r.left) * sc / V.s) / W, (V.y + (e.clientY - r.top) * sc / V.s) / H]; };   // css size can differ from the drawing size
   const zoom = (f2, mx, my) => { const wx = V.x + mx / V.s, wy = V.y + my / V.s; V.s = Math.max(k, Math.min(k * 8, V.s * f2)); V.x = wx - mx / V.s; V.y = wy - my / V.s;
     V.x = Math.max(0, Math.min(W - W * k / V.s, V.x)); V.y = Math.max(0, Math.min(H - H * k / V.s, V.y)); draw(); };
   const tb = () => ov.querySelectorAll('.atB').forEach(b => b.classList.toggle('on', b.dataset.act === act || b.dataset.tool === tool));
   ov.querySelectorAll('.atB').forEach(b => b.onclick = () => { if (b.dataset.act) act = b.dataset.act; if (b.dataset.tool) tool = b.dataset.tool; tb();
+    shpRow.style.display = tool === 'shape' ? 'flex' : 'none';
+    if (tool === 'shape'){ if (!busy) msg.textContent = shp ? '⬭ اسحب جوه الشكل تحرّكه — الأطراف: عرض/طول — الزوايا: تكبير متناسب' : '⬭ اختار شكل جاهز قريب من العدسة'; draw(); return; }
+    if (tool === 'outer'){ if (!busy) msg.textContent = '⭕ ارسم حد بره العدسة (على الإطار) — التحديد مش هيعدّيه أبداً'; draw(); return; }
+    draw();
     if (!busy) msg.textContent = tool === 'draw' ? (act === 'add' ? '✏️ ارسم حوالين الحتة اللي عاوز تضيفها' : '✏️ ارسم حوالين الحتة اللي عاوز تشيلها') : (act === 'add' ? '👆 المس الحتة اللي عاوز تضيفها (نقطة خضرا)' : '👆 المس الحتة اللي عاوز تشيلها (نقطة حمرا)'); });
   tb();
+
+  // ── shape math: rays from a centre → median → Fourier = a smooth closed lens outline ──
+  const cen = P => { let x = 0, y = 0; P.forEach(p => { x += p[0]; y += p[1]; }); return [x / P.length, y / P.length]; };
+  const rays = (P, cx, cy) => { const R = new Float64Array(360); for (let a = 0; a < 360; a++){ const t = a / 180 * Math.PI, ux = Math.cos(t), uy = -Math.sin(t); let best = 0;
+      for (let i = 0, j = P.length - 1; i < P.length; j = i++){ const ax = P[j][0] - cx, ay = P[j][1] - cy, ex = P[i][0] - P[j][0], ey = P[i][1] - P[j][1], den = ux * ey - uy * ex; if (Math.abs(den) < 1e-9) continue;
+        const sR = (ax * ey - ay * ex) / den, u = (ax * uy - ay * ux) / den; if (sR > 0 && u >= 0 && u <= 1 && sR > best) best = sR; } R[a] = best; } return R; };
+  const med = (R, h) => { const N = R.length, o = new Float64Array(N); for (let i = 0; i < N; i++){ const w = []; for (let k2 = -h; k2 <= h; k2++) w.push(R[(i + k2 + N) % N]); w.sort((a, b) => a - b); o[i] = w[h]; } return o; };
+  const four = (R, K) => { const N = R.length, o = new Float64Array(N); for (let f = 0; f <= K; f++){ let re = 0, im = 0; for (let i = 0; i < N; i++){ const t = 2 * Math.PI * f * i / N; re += R[i] * Math.cos(t); im += R[i] * Math.sin(t); }
+      const w = (f ? 2 : 1) / N * (f > K * 0.6 ? 0.5 + 0.5 * Math.cos(Math.PI * (f - K * 0.6) / (K * 0.4)) : 1); for (let i = 0; i < N; i++){ const t = 2 * Math.PI * f * i / N; o[i] += w * (re * Math.cos(t) + im * Math.sin(t)); } } return o; };
+  // guide = your drawing/shape: the AI may only nudge it a little (in −6%…+3%), wild jumps are ignored; outer = a wall it never crosses
+  const finish = (P, o = {}) => { const [cx, cy] = cen(o.guide || P); let R = rays(P, cx, cy);
+    if (o.guide){ const G = rays(o.guide, cx, cy); let D = R.map((r, i) => { const d = r - G[i], lo = -0.06 * G[i], hi = 0.03 * G[i]; return (d < lo * 2 || d > hi * 2 || !r) ? 0 : Math.max(lo, Math.min(hi, d)); }); D = med(D, 9); R = G.map((g2, i) => g2 + D[i]); }
+    R = med(R, o.h || 3);
+    const wall = () => { if (!outer) return; const O = rays(outer, cx, cy); if (O.filter(v => v > 0).length > 300) R = R.map((r, i) => O[i] > 0 ? Math.min(r, O[i] * 0.99) : r); };
+    wall(); R = four(R, o.K || 24); wall();
+    const out = []; for (let a = 0; a < 360; a++){ const t = a / 180 * Math.PI; out.push([cx + Math.cos(t) * R[a], cy - Math.sin(t) * R[a]]); } return out; };
+  // ready-made lens shapes (16 control points, smooth closed curve) — stretch / scale / move / per point
+  const mkShape = kind => { const P = []; const n = { oval:2, round:2, rect:4.2, square:3.2, cat:2.5, avi:2.3, pan:2.3 }[kind];
+    for (let i = 0; i < 16; i++){ const t = i / 16 * 2 * Math.PI, co = Math.cos(t), si = Math.sin(t); let x = Math.sign(co) * Math.abs(co) ** (2 / n), y = Math.sign(si) * Math.abs(si) ** (2 / n);
+      if (kind === 'cat'){ if (y > 0) y *= 1 + 0.45 * Math.max(0, x); else x *= x > 0 ? 0.8 : 1; }
+      if (kind === 'avi'){ if (y > 0) y *= 0.8; else { y *= 1 + 0.35 * Math.max(0, -x); x -= 0.15 * (-y); } }
+      if (kind === 'pan'){ if (y > 0){ y *= 0.82; x *= 1.05; } }
+      P.push([x, -y]); }
+    let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9; P.forEach(([x, y]) => { a0 = Math.min(a0, x); a1 = Math.max(a1, x); b0 = Math.min(b0, y); b1 = Math.max(b1, y); });
+    return P.map(([x, y]) => [(x - a0) / (a1 - a0) * 2 - 1, (y - b0) / (b1 - b0) * 2 - 1]); };
+  const shAbs = () => shp.ctrl.map(([u, v]) => [shp.x0 + (u + 1) / 2 * (shp.x1 - shp.x0), shp.y0 + (v + 1) / 2 * (shp.y1 - shp.y0)]);
+  const shCurve = () => { const C = shAbs(), n = C.length, out = []; for (let i = 0; i < n; i++){ const p0 = C[(i - 1 + n) % n], p1 = C[i], p2 = C[(i + 1) % n], p3 = C[(i + 2) % n];
+      for (let s2 = 0; s2 < 16; s2++){ const t = s2 / 16, t2 = t * t, t3 = t2 * t; out.push([0, 1].map(d => 0.5 * (2 * p1[d] + (-p0[d] + p2[d]) * t + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * t2 + (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * t3))); } } return out; };
+  const shApply = () => { const P = shCurve().map(([x, y]) => [x * cv.width / W, y * cv.height / H]); res = { score:1, pts:finish(P, { K:40, h:1 }), drawn:true }; okOn(); };
+  const shRefit = () => { const A = shAbs(); let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9; A.forEach(([x, y]) => { a0 = Math.min(a0, x); a1 = Math.max(a1, x); b0 = Math.min(b0, y); b1 = Math.max(b1, y); });
+    shp.x0 = a0; shp.x1 = a1; shp.y0 = b0; shp.y1 = b1; shp.ctrl = A.map(([x, y]) => [(x - a0) / (a1 - a0) * 2 - 1, (y - b0) / (b1 - b0) * 2 - 1]); };
+  const shHandles = () => { const { x0, x1, y0, y1 } = shp, xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+    return [['c', x0, y0, x1, y1], ['c', x1, y0, x0, y1], ['c', x1, y1, x0, y0], ['c', x0, y1, x1, y0], ['ex0', x0, ym], ['ex1', x1, ym], ['ey0', xm, y0], ['ey1', xm, y1]]; };
+  const shpRow = ov.querySelector('#atShp');
+  shpRow.innerHTML = [['oval', '⬭ بيضاوي'], ['round', '◯ دائري'], ['rect', '▭ مستطيل'], ['square', '▢ مربع'], ['cat', '🐱 كات آي'], ['avi', '💧 أفياتور'], ['pan', '◠ بانتوس']].map(([k2, t]) => `<button class="atS" data-shp="${k2}">${t}</button>`).join('')
+    + '<button class="atS" id="atShFlip">↔ اقلب</button><button class="atS" id="atShPts">⚫ نقطة نقطة</button>';
+  shpRow.querySelectorAll('[data-shp]').forEach(b => b.onclick = () => {
+    let x0, x1, y0, y1; if (res){ const P = res.pts.map(([x, y]) => [x * W / cv.width, y * H / cv.height]); x0 = Math.min(...P.map(p => p[0])); x1 = Math.max(...P.map(p => p[0])); y0 = Math.min(...P.map(p => p[1])); y1 = Math.max(...P.map(p => p[1])); }
+    else { const vw = W * k / V.s, vh = H * k / V.s, cx = V.x + vw / 2, cy = V.y + vh / 2, hw = Math.min(vw, vh) * 0.3; x0 = cx - hw; x1 = cx + hw; y0 = cy - hw * (b.dataset.shp === 'round' ? 1 : 0.75); y1 = cy + hw * (b.dataset.shp === 'round' ? 1 : 0.75); }
+    if (b.dataset.shp === 'round'){ const m = Math.max(x1 - x0, y1 - y0) / 2, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2; x0 = cx - m; x1 = cx + m; y0 = cy - m; y1 = cy + m; }
+    shp = { x0, x1, y0, y1, ctrl:mkShape(b.dataset.shp) }; shpRow.querySelectorAll('[data-shp]').forEach(z => z.classList.toggle('on', z === b)); shApply(); draw();
+    msg.textContent = '⬭ اسحب جوه الشكل تحرّكه — الأطراف: عرض/طول — الزوايا: تكبير متناسب — وبعدين 🧠 أو تم ✓'; });
+  shpRow.querySelector('#atShFlip').onclick = () => { if (!shp) return; shp.ctrl = shp.ctrl.map(([u, v]) => [-u, v]); shApply(); draw(); };
+  shpRow.querySelector('#atShPts').onclick = e2 => { shPts = !shPts; e2.target.classList.toggle('on', shPts); draw(); };
   // lasso edit (photoshop-like): the drawn closed shape is added to / cut from the current selection
   const lasso = (P, add) => {
     const m = document.createElement('canvas'), q = Math.min(1, 900 / Math.max(cv.width, cv.height)); m.width = Math.round(cv.width * q); m.height = Math.round(cv.height * q);
@@ -2045,20 +2096,41 @@ async function aiTapMode(){
   c.addEventListener('pointercancel', endP);
   ov.querySelector('#atZi').onclick = () => zoom(1.4, W * k / 2, H * k / 2);
   ov.querySelector('#atZo').onclick = () => zoom(1 / 1.4, W * k / 2, H * k / 2);
+  ov.querySelector('#atSm').onclick = () => { if (!res) return; res = { ...res, pts:finish(res.pts, { K:12, h:6 }) }; draw(); msg.textContent = '✨ اتنعّم — دوس تاني لو عاوز أنعم'; };
   ov.querySelector('#atZf').onclick = () => { V.x = 0; V.y = 0; V.s = k; draw(); };
-  c.addEventListener('pointerdown', e => { if (tool !== 'draw' || busy || ptrs.size > 1) return; c.setPointerCapture(e.pointerId); const r = c.getBoundingClientRect();
+  c.addEventListener('pointerdown', e => { if ((tool !== 'draw' && tool !== 'outer') || busy || ptrs.size > 1) return; c.setPointerCapture(e.pointerId); const r = c.getBoundingClientRect();
     const q = toImg(e); stroke = [[q[0] * cv.width, q[1] * cv.height]]; });
   c.addEventListener('pointermove', e => { if (!stroke) return; const r = c.getBoundingClientRect(); const q = toImg(e); stroke.push([q[0] * cv.width, q[1] * cv.height]);
-    draw(); g.strokeStyle = act === 'add' ? '#22c55e' : '#ef4444'; g.lineWidth = 3 / V.s; g.setLineDash([8 / V.s, 5 / V.s]); g.beginPath();
+    draw(); g.strokeStyle = tool === 'outer' ? '#fb923c' : act === 'add' ? '#22c55e' : '#ef4444'; g.lineWidth = 3 / V.s; g.setLineDash([8 / V.s, 5 / V.s]); g.beginPath();
     stroke.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.stroke(); g.setLineDash([]); });
+  c.addEventListener('pointerdown', e => { if (ptrs.size > 1){ if (shDrag){ shp = shDrag.o; shDrag = null; draw(); } return; }
+    if (tool !== 'shape' || !shp || busy) return; const q = toImg(e), X = q[0] * W, Y = q[1] * H, tol = 22 / V.s, o = JSON.parse(JSON.stringify(shp));
+    c.setPointerCapture(e.pointerId);
+    if (shPts){ const A = shAbs(); let bi = -1, bd = tol; A.forEach(([x, y], i) => { const d = Math.hypot(x - X, y - Y); if (d < bd){ bd = d; bi = i; } }); if (bi >= 0){ shDrag = { k:'p', i:bi, o }; return; } }
+    for (const h of shHandles()) if (Math.hypot(h[1] - X, h[2] - Y) < tol){ shDrag = { k:h[0], h, o }; return; }
+    if (X > shp.x0 && X < shp.x1 && Y > shp.y0 && Y < shp.y1){ shDrag = { k:'m', X, Y, o }; return; }
+    panS = { x:e.clientX, y:e.clientY, vx:V.x, vy:V.y }; });
+  c.addEventListener('pointermove', e => { if (!shDrag || ptrs.size > 1) return; const q = toImg(e), X = q[0] * W, Y = q[1] * H, o = shDrag.o, mn = 20;
+    if (shDrag.k === 'm'){ const dx = X - shDrag.X, dy = Y - shDrag.Y; shp.x0 = o.x0 + dx; shp.x1 = o.x1 + dx; shp.y0 = o.y0 + dy; shp.y1 = o.y1 + dy; }
+    else if (shDrag.k === 'c'){ const [, cx2, cy2, ox, oy] = shDrag.h, vx = cx2 - ox, vy = cy2 - oy, f = Math.max(0.1, ((X - ox) * vx + (Y - oy) * vy) / (vx * vx + vy * vy));
+      const nx = ox + vx * f, ny = oy + vy * f; shp.x0 = Math.min(ox, nx); shp.x1 = Math.max(ox, nx); shp.y0 = Math.min(oy, ny); shp.y1 = Math.max(oy, ny); }
+    else if (shDrag.k === 'ex0') shp.x0 = Math.min(X, o.x1 - mn); else if (shDrag.k === 'ex1') shp.x1 = Math.max(X, o.x0 + mn);
+    else if (shDrag.k === 'ey0') shp.y0 = Math.min(Y, o.y1 - mn); else if (shDrag.k === 'ey1') shp.y1 = Math.max(Y, o.y0 + mn);
+    else if (shDrag.k === 'p'){ shp.ctrl[shDrag.i] = [(X - shp.x0) / (shp.x1 - shp.x0) * 2 - 1, (Y - shp.y0) / (shp.y1 - shp.y0) * 2 - 1]; }
+    draw(); });
   const draw = () => { g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#111'; g.fillRect(0, 0, c.width, c.height); g.setTransform(dpr * V.s, 0, 0, dpr * V.s, -V.x * dpr * V.s, -V.y * dpr * V.s); g.drawImage(cv, 0, 0, W, H);
     if (res){ g.fillStyle = 'rgba(163,230,53,.18)'; g.strokeStyle = '#a3e635'; g.lineWidth = 3 / V.s; g.beginPath(); res.pts.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.closePath(); g.fill(); g.stroke(); }
+    if (outer){ g.strokeStyle = '#fb923c'; g.lineWidth = 2.5 / V.s; g.setLineDash([10 / V.s, 6 / V.s]); g.beginPath(); outer.forEach(([x, y], i) => i ? g.lineTo(x * W / cv.width, y * H / cv.height) : g.moveTo(x * W / cv.width, y * H / cv.height)); g.closePath(); g.stroke(); g.setLineDash([]); }
+    if (shp && tool === 'shape'){ g.strokeStyle = '#38bdf8'; g.lineWidth = 2 / V.s; g.beginPath(); shCurve().forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke();
+      g.setLineDash([6 / V.s, 5 / V.s]); g.strokeRect(shp.x0, shp.y0, shp.x1 - shp.x0, shp.y1 - shp.y0); g.setLineDash([]);
+      const hs = 9 / V.s; for (const h of shHandles()){ g.fillStyle = h[0] === 'c' ? '#38bdf8' : '#e0f2fe'; g.fillRect(h[1] - hs, h[2] - hs, hs * 2, hs * 2); }
+      if (shPts) for (const [x, y] of shAbs()){ g.fillStyle = '#fde047'; g.beginPath(); g.arc(x, y, 7 / V.s, 0, 7); g.fill(); } }
     for (const [x, y] of pos){ g.fillStyle = '#22c55e'; g.beginPath(); g.arc(x * W, y * H, 7 / V.s, 0, 7); g.fill(); }
     for (const [x, y] of neg){ g.fillStyle = '#ef4444'; g.beginPath(); g.arc(x * W, y * H, 7 / V.s, 0, 7); g.fill(); } };
   draw();
   const close = () => ov.remove();
   ov.querySelector('#atNo').onclick = close;
-  ov.querySelector('#atClr').onclick = () => { pos = []; neg = []; res = null; crop = null; msg.textContent = '👆 حط نقطة خضرا جوه العدسة أو ارسمها ✏️ — وبعدين شغّل 🧠'; ov.querySelector('#atOk').disabled = true; ov.querySelector('#atOk').style.opacity = .5; draw(); };
+  ov.querySelector('#atClr').onclick = () => { pos = []; neg = []; res = null; crop = null; outer = null; shp = null; msg.textContent = '👆 حط نقطة خضرا جوه العدسة أو ارسمها ✏️ — وبعدين شغّل 🧠'; ov.querySelector('#atOk').disabled = true; ov.querySelector('#atOk').style.opacity = .5; draw(); };
   const inside = (P, x, y) => { let r = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++){ const a = P[i], b = P[j]; if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) r = !r; } return r; };
   const okOn = () => { const ok = ov.querySelector('#atOk'); ok.disabled = false; ok.style.opacity = 1; };
   const aiBtn = ov.querySelector('#atAI'), aiShow = () => { aiBtn.classList.toggle('on', aiOn); aiBtn.textContent = aiOn ? '🧠 ذكاء: شغال' : '🧠 ذكاء: مطفي'; };
@@ -2066,7 +2138,9 @@ async function aiTapMode(){
   c.addEventListener('pointerup', async e => {
     endP(e); if (multi){ if (!ptrs.size) multi = false; stroke = null; return; }   // any two-finger gesture never leaves a point
     if (tool === 'pan') return;
-    if (tool === 'draw'){ if (stroke && stroke.length > 5){ lasso(stroke, act === 'add'); stroke = null; draw(); if (res){ msg.textContent = '✓ اتعدّل — كمّل أو دوس تم ✓'; okOn(); } } stroke = null; return; }
+    if (tool === 'shape'){ if (shDrag){ if (shDrag.k === 'p') shRefit(); shDrag = null; shApply(); draw(); } return; }
+    if (tool === 'outer'){ if (stroke && stroke.length > 5){ outer = stroke; if (res) res = { ...res, pts:finish(res.pts, { K:30, h:1 }) }; msg.textContent = '⭕ اتحط الحد — التحديد مش هيعدّيه'; } stroke = null; draw(); return; }
+    if (tool === 'draw'){ if (stroke && stroke.length > 5){ lasso(stroke, act === 'add'); if (res) res.pts = finish(res.pts, { K:30, h:2 }); stroke = null; draw(); if (res){ msg.textContent = '✓ اتعدّل — كمّل أو دوس تم ✓'; okOn(); } } stroke = null; return; }
     if (busy){ msg.textContent = msg.textContent.replace(/ — استنى.*/, '') + ' — استنى لحد ما يخلص'; return; }
     const [x, y] = toImg(e);
     if (act === 'del') neg.push([x, y]); else pos.push([x, y]);
@@ -2079,6 +2153,7 @@ async function aiTapMode(){
     if (!pos.length){ msg.textContent = '👆 حط نقطة خضرا جوه العدسة الأول'; return; }
     // a shape you drew/edited is the guide for this run (instead of the automatic rays)
     if (res && res.drawn){ crop = null; }
+    const guide = res && res.drawn ? res.pts.slice() : null;
     busy = true;
     const A = await aiLoad(msg); if (!A){ msg.textContent = '⚠️ الذكاء الاصطناعي مش متاح دلوقتي — جرّب تاني والنت شغال'; busy = false; return; }
     // live % (estimate from the last run's duration; the AI itself gives no progress)
@@ -2112,6 +2187,7 @@ async function aiTapMode(){
       for (let i = 0; i < 12; i++){ const p = prC[Math.round(i * prC.length / 12) % prC.length]; hintOut.push([(mx + (p[0] - mx) * 1.12) / crop.cv.width, (my + (p[1] - my) * 1.12) / crop.cv.height]); }
       const r2 = await A.segmentLens(crop.cv, null, pos.map(toC).concat(hintIn), neg.map(toC).concat(hintOut), prC, crop.drawn ? { lo:0.92, hi:1.04 } : null);   // your drawing is the boss: the AI only snaps it to the edge
       res = r2 && { ...r2, pts:r2.pts.map(([x, y]) => [(x / crop.k + crop.x) * cv.width / W, (y / crop.k + crop.y) * cv.height / H]) };
+      if (res) res.pts = guide ? finish(res.pts, { guide, K:22, h:4 }) : finish(res.pts, { K:18, h:5 });   // smooth always; with your drawing it only snaps a few px to the edge
     }catch(err){ console.error(err); res = null; }
     clearInterval(tick); if (!(crop && crop.n === pos.length && performance.now() - t0 < 2500)) window.__aiDur = performance.now() - t0;
     busy = false; draw();
@@ -3131,7 +3207,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 70;
+const APP_V = 71;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
