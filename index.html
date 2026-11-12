@@ -1468,6 +1468,147 @@ function pickBox(img){
     draw();
   });
 }
+/* Offline lens finder: every lens opening in the photo is a region with no strong edges that the rim closes off.
+   1) small colour-gradient map → strong edges, thickened a little so rim gaps close
+   2) label the edge-free regions; a lens opening is one that does not touch the photo border, has a lens-like size
+      and proportions and fills most of its own box (shelf strips, background and text don't)
+   3) pieces of one lens (a temple crossing it) are merged; returns boxes (0..1) around each opening incl. some rim */
+function findLensBoxes(img, opts = {}){
+  const src = img.cv, W = 320, k = W / src.width, H = Math.round(src.height * k);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d', { willReadFrequently:true }); x.filter = 'blur(1px)'; x.drawImage(src, 0, 0, W, H); x.filter = 'none';
+  const d = x.getImageData(0, 0, W, H).data, n = W * H, G = new Float32Array(n);
+  for (let y = 1; y < H - 1; y++) for (let xx = 1; xx < W - 1; xx++){
+    let m = 0;
+    for (let ch = 0; ch < 3; ch++){
+      const P = (a, b) => d[((y + b) * W + xx + a) * 4 + ch];
+      const gx = P(1,-1) + 2*P(1,0) + P(1,1) - P(-1,-1) - 2*P(-1,0) - P(-1,1), gy = P(-1,1) + 2*P(0,1) + P(1,1) - P(-1,-1) - 2*P(0,-1) - P(1,-1);
+      m = Math.max(m, gx * gx + gy * gy);
+    }
+    G[y * W + xx] = Math.sqrt(m);
+  }
+  const s = Array.from(G).filter((v, i) => i % 7 === 0).sort((a, b) => a - b);
+  const thr = Math.max(opts.tmin ?? 40, s[Math.floor(s.length * 0.9)] * 0.55);
+  const E = new Uint8Array(n); for (let i = 0; i < n; i++) E[i] = G[i] > thr ? 1 : 0;
+  const R = opts.dil ?? 2, D = new Uint8Array(n);                      // thicken edges (closes small rim gaps)
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) if (E[y * W + xx])
+    for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++){ const X = xx + a, Y = y + b; if (X >= 0 && Y >= 0 && X < W && Y < H) D[Y * W + X] = 1; }
+  const L = new Int32Array(n).fill(-1), regs = [], st = new Int32Array(n);
+  for (let i = 0; i < n; i++){
+    if (D[i] || L[i] >= 0) continue;
+    let top = 0, area = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, border = false; const rows = new Map(); st[top++] = i; L[i] = regs.length;
+    while (top){
+      const p = st[--top], px = p % W, py = (p / W) | 0; area++;
+      if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; const rr = rows.get(py); if (!rr) rows.set(py, [px, px]); else { if (px < rr[0]) rr[0] = px; if (px > rr[1]) rr[1] = px; }
+      if (px === 0 || py === 0 || px === W - 1 || py === H - 1) border = true;
+      for (const q of [p - 1, p + 1, p - W, p + W]){ if (q < 0 || q >= n) continue; if ((q % W === 0 && px === W - 1) || (px === 0 && q % W === W - 1)) continue;
+        if (!D[q] && L[q] < 0){ L[q] = regs.length; st[top++] = q; } }
+    }
+    const pts = []; for (const [yy, [a, b]] of rows){ pts.push([a, yy], [b, yy]); } regs.push({ area, x0, x1, y0, y1, border, pts });
+  }
+  const minA = n * 0.004, maxA = n * 0.3;
+  let cand = regs.filter(r => !r.border && r.area >= minA * 0.35 && r.area <= maxA);
+  // merge pieces of the same lens (a temple or a tag edge cutting through it): the pieces plus the thin cut fill
+  // almost all of their joint convex hull; a lens next to the bridge gap or a tag leaves big empty corners → no merge
+  const hullArea = P => { const Q = P.slice().sort((p, q) => p[0] - q[0] || p[1] - q[1]); if (Q.length < 3) return 0;
+    const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); const lo = [], up = [];
+    for (const p of Q){ while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    for (let i = Q.length - 1; i >= 0; i--){ const p = Q[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+    const H2 = lo.slice(0, -1).concat(up.slice(0, -1)); let A = 0; for (let i = 0; i < H2.length; i++){ const p = H2[i], q = H2[(i + 1) % H2.length]; A += p[0] * q[1] - q[0] * p[1]; } return Math.abs(A) / 2; };
+  const u = (a, b) => ({ area:a.area + b.area, x0:Math.min(a.x0, b.x0), x1:Math.max(a.x1, b.x1), y0:Math.min(a.y0, b.y0), y1:Math.max(a.y1, b.y1), pts:a.pts.concat(b.pts) });
+  const gap = 2 * R + 6;
+  const near = (a, b) => a.x0 <= b.x1 + gap && b.x0 <= a.x1 + gap && a.y0 <= b.y1 + gap && b.y0 <= a.y1 + gap;
+  const looks = r => { const w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1, asp = w / h; return r.area >= minA && asp > 0.75 && asp < 2.9 && r.area / (w * h) > 0.5 && w < W * 0.7; };
+  let merged = true;
+  while (merged){
+    merged = false;
+    cand.sort((a, b) => b.area - a.area);
+    outer: for (let i = 0; i < cand.length; i++) for (let j = i + 1; j < cand.length; j++){
+      if (!near(cand[i], cand[j])) continue;
+      const m = u(cand[i], cand[j]), w = m.x1 - m.x0 + 1, h = m.y1 - m.y0 + 1;
+      if (w / h > 2.9 || w / h < 0.6 || w > W * 0.7) continue;
+      if (m.area / hullArea(m.pts) > (opts.hull ?? 0.86)){ cand[i] = m; cand.splice(j, 1); merged = true; break outer; }
+    }
+  }
+  const pad = opts.pad ?? 0.1;
+  return cand.filter(looks).sort((a, b) => b.area - a.area).slice(0, 8).map(r => {
+    const w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1, px = w * pad + R, py = h * pad + R;
+    return { x0:Math.max(0, (r.x0 - px) / W), y0:Math.max(0, (r.y0 - py) / H), x1:Math.min(1, (r.x1 + 1 + px) / W), y1:Math.min(1, (r.y1 + 1 + py) / H), fill:r.area / (w * h) };
+  });
+}
+
+/* All lens openings in the photo, traced and grouped per frame: [{ tr, last, box, mirror }] — one entry per frame
+   (its image-RIGHT lens = our canonical side; if only the left lens traced well, it is mirrored). */
+function findFrames(img){
+  const iou = (a, b) => { const ix = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0)), iy = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+    const I = ix * iy, U = (a.x1 - a.x0) * (a.y1 - a.y0) + (b.x1 - b.x0) * (b.y1 - b.y0) - I; return U > 0 ? I / U : 0; };
+  let boxes = [];
+  for (const o of [{ dil:2 }, { dil:3 }, { dil:3, tmin:25 }, { dil:1, tmin:55 }]) boxes.push(...findLensBoxes(img, o));
+  const lenses = [];
+  for (const b of boxes){
+    if (lenses.some(l => iou(l.box, b) > 0.55)) continue;
+    const tr = traceLens(img, b, {}); const last = lastTrace;
+    if (tr.quality < 0.85) continue;
+    lenses.push({ box:b, tr, last, area:(b.x1 - b.x0) * (b.y1 - b.y0) });
+  }
+  if (!lenses.length) return [];
+  const amax = Math.max(...lenses.map(l => l.area));
+  const inside = (p, q) => { const x = (p.box.x0 + p.box.x1) / 2, y = (p.box.y0 + p.box.y1) / 2; return x > q.box.x0 && x < q.box.x1 && y > q.box.y0 && y < q.box.y1; };
+  let L = lenses.filter(l => l.area >= amax * 0.45 && l.tr.aspect > 0.85 && l.tr.aspect < 2.8)
+    .sort((a, b) => b.area - a.area).filter((l, i, arr) => !arr.slice(0, i).some(q => inside(l, q) || inside(q, l)));   // one lens = one entry
+  // pair lenses of one frame: side by side, same height and size
+  const cx = l => (l.box.x0 + l.box.x1) / 2, cy = l => (l.box.y0 + l.box.y1) / 2, hh = l => l.box.y1 - l.box.y0, ww = l => l.box.x1 - l.box.x0;
+  L.sort((a, b) => cy(a) - cy(b) || cx(a) - cx(b));
+  const used = new Set(), frames = [];
+  for (const a of L){
+    if (used.has(a)) continue; used.add(a);
+    let mate = null, best = 1e9;
+    for (const b of L){ if (used.has(b)) continue;
+      const dx = Math.abs(cx(a) - cx(b)), dy = Math.abs(cy(a) - cy(b));
+      if (dy < 0.6 * Math.max(hh(a), hh(b)) && dx < 3.2 * Math.max(ww(a), ww(b)) && Math.abs(hh(a) - hh(b)) < 0.4 * Math.max(hh(a), hh(b)) && dx < best){ best = dx; mate = b; } }
+    if (mate) used.add(mate);
+    const pair = mate ? [a, mate].sort((p, q) => cx(p) - cx(q)) : [a];
+    const right = pair[pair.length - 1], left = pair.length > 1 ? pair[0] : null;
+    // prefer the image-right lens; use the mirrored left one only if it traced clearly better
+    const pick = left && left.tr.quality > right.tr.quality + 0.08 ? left : right;
+    const mirror = pick === left || (!left && cx(a) < 0.5);   // a lone lens on the left half is most likely a left lens
+    frames.push({ ...pick, mirror, y:cy(pick) });
+  }
+  return frames.sort((a, b) => a.y - b.y).slice(0, 6);
+}
+// ---- end lens finder
+/* Several frames (or both lenses) in one photo → a small chooser: one button per frame with its traced outline,
+   tap = apply and close. Resolves to the index, 'manual' (draw the box by hand) or null. */
+function chooseFrame(frames){
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000b;display:flex;align-items:flex-end;justify-content:center';
+    const sh = document.createElement('div');
+    sh.style.cssText = 'width:100%;max-width:520px;background:#0b1a0b;border:1px solid #a3e63566;border-radius:16px 16px 0 0;padding:14px 12px 18px;direction:rtl;text-align:center';
+    const svg = f => { const P = f.pts; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const [x, y] of P){ x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      const w = x1 - x0, h = y1 - y0, k = Math.min(36 / w, 24 / h), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      return `<svg viewBox="-20 -14 40 28" width="44" height="31"><path d="${P.map((p, i) => (i ? 'L' : 'M') + ((p[0] - cx) * k).toFixed(1) + ' ' + (-(p[1] - cy) * k).toFixed(1)).join(' ')}Z" fill="rgba(163,230,53,.14)" stroke="#a3e635" stroke-width="1.6" stroke-linejoin="round"/></svg>`; };
+    sh.innerHTML = `<div style="color:#d9f99d;font-weight:700;font-size:15px;margin-bottom:10px">لقيت ${frames.length} فريم — عاوز أنهي شكل؟</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">${frames.map((f, i) => `<button data-i="${i}" style="position:relative;padding:6px 8px;border-radius:10px;border:1px solid #a3e635;background:#000;line-height:0">${svg(f)}<span style="position:absolute;top:2px;right:5px;font-size:10px;line-height:1;color:#a3e635aa">${i + 1}</span></button>`).join('')}</div>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
+        <button data-m="1" style="padding:8px 14px;border-radius:8px;border:1px solid #a3e63588;background:#1f2937;color:#ecfccb;font-size:13px">✏️ أحدد بإيدي</button>
+        <button data-x="1" style="padding:8px 14px;border-radius:8px;border:1px solid #555;background:#1f2937;color:#ecfccb;font-size:13px">✕ إلغاء</button></div>`;
+    ov.appendChild(sh); document.body.appendChild(ov);
+    const close = v => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', e => { if (e.target === ov) close(null); });
+    sh.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => close(+b.dataset.i)));
+    sh.querySelector('[data-m]').addEventListener('click', () => close('manual'));
+    sh.querySelector('[data-x]').addEventListener('click', () => close(null));
+  });
+}
+// left lens → our canonical (image-right) orientation: mirror x and keep the 0°…360° sample order
+const mirrorPts = P => { const M = P.length; return P.map((_, m) => { const q = P[(M / 2 - m + M) % M]; return [-q[0], q[1]]; }); };
+function useTrace(tr, note){
+  customPts = tr.pts; state.shape = 'custom';
+  if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
+  syncUI(); requestRebuild(); renderShapes();
+  $('shNote').textContent = note || `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
+}
 async function traceFrame(file){
   if (!file) return;
   const note = $('shNote');
@@ -1475,8 +1616,24 @@ async function traceFrame(file){
   try{
     const lim = sample ? (typeof sample.limits === 'function' ? await sample.limits() : { images:true }) : null;
     const img = await loadImageData(file);
+    // 1) offline: find every lens opening in the photo; one frame → apply, several → let the user pick
+    note.textContent = '🔎 بدور على الفريمات في الصورة…';
+    await new Promise(r => setTimeout(r, 30));
+    let frames = [], pick = -1;
+    try{ frames = findFrames(img).map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts })); }catch(e){ console.error(e); }
+    if (frames.length){
+      pick = frames.length === 1 ? 0 : await chooseFrame(frames);
+      if (pick === null){ note.textContent = 'اتلغى الاختيار'; return; }
+      if (pick !== 'manual'){
+        const f = frames[pick];
+        lastTrace = f.mirror ? null : f.last; customPreview = f.tr.preview;
+        useTrace({ ...f.tr, pts:f.pts }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع` : null);
+        return;
+      }
+    }
     let box;
-    if (lim && lim.images){
+    if (pick === 'manual'){ note.textContent = '👆 حدد العدسة اليمين بمربع على الصورة'; box = await pickBox(img); if (!box){ note.textContent = 'اتلغى التحديد'; return; } }
+    else if (lim && lim.images){
       note.textContent = '🤖 بحدد مكان العدسة…';
       const blob = await new Promise(r => img.cv.toBlob(r, 'image/jpeg', 0.88));
       box = await sample.json(FRAME_PROMPT, { images:[blob], modelTier:'complex' });
@@ -1493,10 +1650,7 @@ async function traceFrame(file){
     const preset = SHAPE_NAME[box.shape] && box.shape !== 'custom' ? box.shape : null;
     const boxAspect = Math.abs(box.x1 - box.x0) * img.cv.width / (Math.abs(box.y1 - box.y0) * img.cv.height);
     if (tr.quality >= 0.6){
-      customPts = tr.pts; state.shape = 'custom';
-      if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
-      syncUI(); requestRebuild(); renderShapes();
-      $('shNote').textContent = `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
+      useTrace(tr);
     } else {
       // edge not clear enough (rimless / clear acetate / angled photo) → closest preset with the photo's proportions
       if (preset) state.shape = preset;
@@ -2320,7 +2474,7 @@ goView('iso', true);
 requestAnimationFrame(animate);
 
 // expose for debugging
-window.__trace = { loadImageData, traceLens, get last(){ return lastTrace; } };
+window.__trace = { loadImageData, traceLens, findFrames, findLensBoxes, get last(){ return lastTrace; } };
 window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, get state(){ return state; }, get root(){ return root; }, get stats(){ return lastStats; } };
 </script>
 <script>if(/IHABApk(?!Full)/.test(navigator.userAgent)||/[?&]apk=1/.test(location.search)){const c=document.getElementById('cardBtn');if(c)c.style.display='none';}</script>
@@ -2328,7 +2482,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 35;
+const APP_V = 36;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
