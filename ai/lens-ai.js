@@ -75,9 +75,9 @@ export async function segmentLens(cv, box, pos = [], neg = [], prior = null){
   const pr = t => { let bd = 9, br = 0; for (const p of prior){ const a = Math.atan2(cy - p[1], p[0] - cx), d = Math.abs(Math.atan2(Math.sin(a - t), Math.cos(a - t))); if (d < bd){ bd = d; br = Math.hypot(p[0] - cx, p[1] - cy); } } return br; };
   const Rall = Math.hypot(best.x1 - best.x0, best.y1 - best.y0) * 0.6, rr = new Float32Array(360), used = new Uint8Array(360);
   for (let a = 0; a < 360; a++){
-    const t = a / 360 * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t), p0 = prior ? pr(t) : 0, R = prior ? p0 * 1.08 : Rall;
+    const t = a / 360 * Math.PI * 2, ux = Math.cos(t), uy = -Math.sin(t), p0 = prior ? pr(t) : 0, R = prior ? p0 * 1.12 : Rall;
     let last = 0; for (let s = 0; s < R; s += 0.5) if (at((cx + ux * s) * sx, (cy + uy * s) * sy)) last = s;
-    if (prior && last < p0 * 0.82){ rr[a] = p0; } else { rr[a] = last; used[a] = 1; }
+    if (prior && last < p0 * 0.8){ rr[a] = p0; } else { rr[a] = last; used[a] = 1; }
   }
   const med = Array.from(rr, (_, a) => { const w = []; for (let q = -6; q <= 6; q++) w.push(rr[(a + q + 360) % 360]); w.sort((p, q) => p - q); return w[6]; });
   const pts = med.map((r, a) => { const t = a / 360 * Math.PI * 2; return [cx + Math.cos(t) * r, cy - Math.sin(t) * r]; });
