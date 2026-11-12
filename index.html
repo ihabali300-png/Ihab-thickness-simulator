@@ -1672,6 +1672,7 @@ function findFrames(img){
 // ---- end lens finder
 /* Several frames (or both lenses) in one photo → a small chooser: one button per frame with its traced outline,
    tap = apply and close. Resolves to the index, 'manual' (draw the box by hand) or null. */
+const BRIDGE_TIP = '🌉 البردج متقاسش — افتح دراعات الفريم وصوّره من قدام تاني';
 const CLEAR_TIP = '💡 لو الفريم شفاف صوّره على خلفية غامقة (ورقة أو قماشة سودا) عشان الحافة تبان';
 function chooseFrame(frames){
   return new Promise(resolve => {
@@ -1729,6 +1730,7 @@ async function traceFrame(file){
         customBridge = f.bridge && f.bridge.top !== undefined ? f.bridge : null;
         if (f.bridge && f.bridge.dbl) state.DBL = snap(state.A * f.bridge.dbl, 0.5, 12, 26);
         useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, frames.length > 1 ? `تم ✓ اخترت فريم ${pick + 1} من ${frames.length} — ظبّط A و B بمقاس الذراع${f.tr.quality < 0.9 ? ' — ' + CLEAR_TIP : ''}` : null);
+        if (state.frame === 'plastic' && !photoBridge()) $('shNote').textContent += ' — ' + BRIDGE_TIP;
         return;
       }
     }
@@ -1754,6 +1756,7 @@ async function traceFrame(file){
     const boxAspect = Math.abs(box.x1 - box.x0) * img.cv.width / (Math.abs(box.y1 - box.y0) * img.cv.height);
     if (tr.quality >= 0.6){
       useTrace(tr);
+      if (state.frame === 'plastic') $('shNote').textContent += ' — ' + BRIDGE_TIP;
     } else {
       // edge not clear enough (rimless / clear acetate / angled photo) → closest preset with the photo's proportions
       if (preset) state.shape = preset;
@@ -2586,7 +2589,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 40;
+const APP_V = 41;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
