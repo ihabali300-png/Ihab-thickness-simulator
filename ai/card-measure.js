@@ -78,7 +78,7 @@ export function findCard(cv, canvas){
     }
   } finally { [src, g, e, cs, hi, ker].forEach(m => m.delete()); }
   cands.sort((a, b) => b.score - a.score);
-  const best = cands[0]; if (!best || best.score < 0.08) return null;
+  const best = cands[0]; if (!best || best.score < 0.14) return null;   // a lens opening (paper seen through it) has almost no contrast/colour → never taken for the card
   // refine: a straight line through each side's contour points (skipping the rounded corners) → corners = line crossings
   const P = best.P, L = [];
   for (let j = 0; j < 4; j++){

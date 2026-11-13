@@ -2298,15 +2298,27 @@ async function aiTapMode(){
     t2.preview = pc.toDataURL('image/jpeg', 0.85);
     lastTrace = { ...L, mirror }; customPreview = t2.preview;
     lastPhoto = { img, c:[(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2], q:0.99 };
-    if (sMM){ lastPhoto.s = sMM; const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.A = snap((x1 - x0) / sMM + bev, 0.5, 44, 62); }
+    const aMM = sMM ? (x1 - x0) / sMM + (state.frame === 'rimless' ? 0 : CARD_BEVEL) : 0, okMM = aMM > 36 && aMM < 70;
+    if (sMM && okMM){ lastPhoto.s = sMM; state.A = snap(aMM, 0.5, 44, 62); }
     useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, sMM ? '' : 'تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة اللي لمستها — ظبّط A و B بمقاس الذراع');
-    if (sMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم`; }
+    if (sMM && okMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم`; }
+    else if (sMM) $('shNote').textContent = `⚠️ الشكل اتطبّق، بس المقاس طلع غلط (A ${aMM.toFixed(0)} مم) — غالباً الكارت اتحدد غلط`;
   };
 }
 
 /* 📏 Card measuring: frame face-down on white paper + any bank-size card. OpenCV finds the card, the photo is
    straightened (seen from straight above, true px/mm) → true lens shape + A / B / DBL in mm, no arm reading. */
 const CARD_BEVEL = 1.0;   // the lens is ~0.5 mm bigger than the visible rim opening on each side (groove/bevel)
+/* ⏳ status lines (#shNote, tap page, card page): while working → yellow + blinking; when done → normal */
+(() => {
+  const st = document.createElement('style');
+  st.textContent = '.busyNote{color:#fde047!important;font-weight:700;animation:busyBlink 1s ease-in-out infinite}@keyframes busyBlink{0%,100%{opacity:1}50%{opacity:.35}}';
+  document.head.appendChild(st);
+  const busyRe = /…|\.\.\.|\d+\s*%|%\s*\d+|بجهز|بدور|بحدد|بعدّل|بحمّل|بيحمّل|بيحدد|بيقرا|بقرا|بحلل|بحدّث/, doneRe = /^\s*(تم|✓|✅|📏 تم|⚠️|❌|اتلغى)/;
+  const check = el => { const t = el.textContent || ''; el.classList.toggle('busyNote', busyRe.test(t) && !doneRe.test(t)); };
+  let q = false; new MutationObserver(() => { if (q) return; q = true; queueMicrotask(() => { q = false; document.querySelectorAll('#shNote,#atMsg,#ccMsg,#trMsg').forEach(check); }); })
+    .observe(document.body, { subtree:true, childList:true, characterData:true });
+})();
 function cardGuide(){
   const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604f2;display:flex;flex-direction:column;align-items:center;justify-content:center;direction:rtl;padding:16px;gap:12px;overflow:auto';
   ov.innerHTML = `<svg viewBox="0 0 300 200" style="width:min(88vw,380px);background:#0b1a10;border-radius:14px">
@@ -2316,7 +2328,7 @@ function cardGuide(){
       <g transform="rotate(-4 190 150)"><rect x="160" y="128" width="86" height="54" rx="5" fill="#1e40af"/><rect x="170" y="146" width="12" height="10" rx="2" fill="#facc15"/></g>
       <text x="150" y="16" fill="#a3e635" font-size="11" text-anchor="middle">ورقة بيضا + الفريم مقلوب + كارت</text></svg>
     <div style="color:#ecfccb;font-size:14px;line-height:1.9;max-width:380px">
-      1️⃣ حط ورقة بيضا على الترابيزة<br>2️⃣ اقلب الفريم على وشه فوقها، والدراعات مفتوحة لفوق<br>3️⃣ حط أي كارت بمقاس كارت البنك جنبه على نفس الورقة<br>4️⃣ صوّر من فوق، والفريم والكارت باينين كاملين<br>
+      1️⃣ حط ورقة بيضا على الترابيزة<br>2️⃣ اقلب الفريم على وشه فوقها، والدراعات مفتوحة لفوق<br>3️⃣ حط أي كارت بمقاس كارت البنك جنبه على نفس الورقة (مش فوق العدسات)<br>4️⃣ صوّر من فوق، والفريم والكارت باينين كاملين<br>
       <span style="color:#fde047">💡 مش لازم الصورة تبقى مستوية بالظبط — الكارت بيعدّل الميلان</span><br><span style="color:#93c5fd">🫥 الفريم شفاف؟ نوّر عليه كويس ومن غير ظل</span></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
       <label class="sh-up" style="padding:10px 18px">📷 صوّر<input type="file" accept="image/*" capture="environment" id="cgCam"></label>
@@ -2331,11 +2343,16 @@ function confirmCard(cv0, C0){
   return new Promise(done => {
     const W = cv0.width, H = cv0.height, ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl;overflow:hidden';
-    ov.innerHTML = `<div id="ccMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5"></div><canvas id="ccCv" style="touch-action:none"></canvas>
+    let down = localStorage.getItem('ihabFaceDown') !== '0';
+    ov.innerHTML = `<div id="ccMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 6px;text-align:center;line-height:1.5"></div>
+      <div style="display:flex;gap:8px;padding-bottom:8px"><button class="ccF" data-d="1">⬇️ الفريم مقلوب على وشه</button><button class="ccF" data-d="0">⬆️ وشه لفوق</button></div>
+      <style>.ccF{padding:6px 12px;border-radius:9px;border:1px solid #38bdf866;background:#031018;color:#e0f2fe;font-size:13px}.ccF.on{background:#38bdf8;color:#04121c;font-weight:800}</style><canvas id="ccCv" style="touch-action:none"></canvas>
       <div style="display:flex;gap:10px;padding:12px"><button id="ccNo" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">إلغاء</button>
       <button id="ccOk" style="padding:9px 22px;border-radius:10px;border:0;background:#a3e635;color:#0b1a0f;font-weight:800">تم ✓ قيس</button></div>`;
     document.body.appendChild(ov);
     const c = ov.querySelector('#ccCv'), g = c.getContext('2d'), msg = ov.querySelector('#ccMsg'), dpr = Math.min(2, devicePixelRatio || 1);
+    const fb = () => ov.querySelectorAll('.ccF').forEach(b => b.classList.toggle('on', (b.dataset.d === '1') === down)); fb();
+    ov.querySelectorAll('.ccF').forEach(b => b.onclick = () => { down = b.dataset.d === '1'; localStorage.setItem('ihabFaceDown', down ? '1' : '0'); fb(); });
     msg.textContent = C0 ? '✓ لقيت الكارت — اتأكد إن النقط الأربعة على أركانه (اسحبها لو محتاجة)' : '💳 ملقتش الكارت — اسحب النقط الأربعة لأركان الكارت';
     const top = c.getBoundingClientRect().top, cssW = Math.min(innerWidth, 700), cssH = Math.max(200, innerHeight - top - 66), k = Math.min(cssW / W, cssH / H);
     c.style.width = W * k + 'px'; c.style.height = H * k + 'px'; c.width = W * k * dpr; c.height = H * k * dpr;
@@ -2356,7 +2373,7 @@ function confirmCard(cv0, C0){
     c.addEventListener('pointermove', e => { if (drag < 0) return; const [x, y, cx2, cy2] = pos(e); C[drag] = [Math.max(0, Math.min(W, x + off[0])), Math.max(0, Math.min(H, y + off[1]))]; at = [cx2, cy2]; draw(); });
     c.addEventListener('pointerup', () => { drag = -1; at = null; draw(); });
     ov.querySelector('#ccNo').onclick = () => { ov.remove(); done(null); };
-    ov.querySelector('#ccOk').onclick = () => { ov.remove(); done(C); };
+    ov.querySelector('#ccOk').onclick = () => { ov.remove(); C.down = down; done(C); };
   });
 }
 let cardMod = null;
@@ -2372,19 +2389,16 @@ async function cardMeasure(file){
   let C = null; try{ C = cardMod.findCard(cv, raw.cv); }catch(e){ console.error(e); }
   C = await confirmCard(raw.cv, C); if (!C){ say('اتلغى القياس'); return; }
   say('📐 بعدّل ميلان الصورة…'); await tick();
-  const R = cardMod.rectify(cv, raw.cv, C, { maxSide:2200 });
-  // the card is painted paper-white so it is never taken for a lens
-  { const g2 = R.canvas.getContext('2d', { willReadFrequently:true }), m = 4 * R.s, x0 = Math.max(0, R.card.x0 - m), y0 = Math.max(0, R.card.y0 - m), x1 = Math.min(R.canvas.width, R.card.x1 + m), y1 = Math.min(R.canvas.height, R.card.y1 + m);
-    const ring = g2.getImageData(Math.max(0, x0 - 12), Math.max(0, y0 - 12), Math.min(R.canvas.width, x1 + 12) - Math.max(0, x0 - 12), Math.min(R.canvas.height, y1 + 12) - Math.max(0, y0 - 12)).data, L = [];
-    for (let i = 0; i < ring.length; i += 16) L.push([ring[i], ring[i + 1], ring[i + 2], ring[i] + ring[i + 1] + ring[i + 2]]); L.sort((a, b) => b[3] - a[3]); const q = L[Math.floor(L.length * 0.2)] || [235, 235, 235];
-    g2.fillStyle = `rgb(${q[0]},${q[1]},${q[2]})`; g2.fillRect(x0, y0, x1 - x0, y1 - y0); }
+  const R = cardMod.rectify(cv, raw.cv, C, { maxSide:2200, mirror:C.down !== false });   // face-down = seen from the back → mirror back to a front view
   trHi = R.canvas;
   // detection runs on a ~1100 px copy (what the tracer is tuned for)
   const kk = Math.min(1, 1100 / Math.max(R.canvas.width, R.canvas.height)), sc = document.createElement('canvas'); sc.width = Math.round(R.canvas.width * kk); sc.height = Math.round(R.canvas.height * kk);
   const sg = sc.getContext('2d', { willReadFrequently:true }); sg.drawImage(R.canvas, 0, 0, sc.width, sc.height);
   const img = { cv:sc, ctx:sg, data:sg.getImageData(0, 0, sc.width, sc.height) }, sPx = R.s * kk;   // px per mm on the detection copy
   say('🔎 بدور على الفريم…'); await tick();
-  let frames = []; try{ frames = findFrames(img).map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts, rim:f.mirror ? mirrorArr(f.tr.rim) : f.tr.rim })); }catch(e){ console.error(e); }
+  const cb = { x0:R.card.x0 * kk, x1:R.card.x1 * kk, y0:R.card.y0 * kk, y1:R.card.y1 * kk }, W2 = sc.width, H2 = sc.height;
+  const onCard = f => { const x = (f.box.x0 + f.box.x1) / 2 * W2, y = (f.box.y0 + f.box.y1) / 2 * H2; return x > cb.x0 && x < cb.x1 && y > cb.y0 && y < cb.y1; };
+  let frames = []; try{ frames = findFrames(img).filter(f => !onCard(f)).map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts, rim:f.mirror ? mirrorArr(f.tr.rim) : f.tr.rim })); }catch(e){ console.error(e); }
   lastPhoto = { img, c:[0.5, 0.5], s:sPx }; aiLoad(null);
   if (!frames.length){ say('ملقتش الفريم لوحده — المس داخل العدسة 👆 (المقاسات هتتحسب بالكارت)'); renderShapes(); aiTapMode(); return; }
   frames.sort((a, b) => (b.paired - a.paired) || (b.tr.quality - a.tr.quality));
@@ -2400,10 +2414,12 @@ async function cardMeasure(file){
   lastTrace = { ...f.last, mirror:!!f.mirror }; customPreview = f.tr.preview;
   lastPhoto = { img, c:[(f.box.x0 + f.box.x1) / 2, (f.box.y0 + f.box.y1) / 2], q:f.tr.quality, s:sPx };
   customBridge = f.bridge && f.bridge.top !== undefined ? f.bridge : null;
-  state.A = snap(A, 0.5, 44, 62);
+  const sane = A > 36 && A < 70 && B > 18 && B < 62;
+  if (sane) state.A = snap(A, 0.5, 44, 62);
   useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, '');
-  state.B = snap(B, 0.5, 26, 50); if (D) state.DBL = snap(D, 0.5, 12, 24);
+  if (sane){ state.B = snap(B, 0.5, 26, 50); if (D) state.DBL = snap(D, 0.5, 12, 24); }
   syncUI(); requestRebuild();
+  if (!sane){ say(`⚠️ المقاس طلع غلط (A ${A.toFixed(0)} مم) — غالباً الكارت اتحدد غلط. صوّر تاني والكارت كله باين جنب الفريم، واتأكد إن النقط الأربعة على أركانه`); window.__cardRes = { A, B, D, bad:true }; return; }
   const out = A < 44 || A > 62 ? ' ⚠️ A برّه مدى البرنامج' : '';
   say(`📏 تم ✓ مقاس بالكارت: A ${A.toFixed(1)} • B ${B.toFixed(1)}${D ? ` • DBL ${D.toFixed(1)}` : ''} مم${out} — لو الشكل محتاج تظبيط: 👆 أو ✏️`);
   window.__cardRes = { A, B, D, q:f.tr.quality };   // test hook
@@ -3402,7 +3418,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 77;
+const APP_V = 78;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
