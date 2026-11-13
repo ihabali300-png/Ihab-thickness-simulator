@@ -1282,6 +1282,7 @@ function renderShapes(){
   if (shTab === 'photo'){
     row = `<div class="sh-row sh-photo">
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
+      <button class="sh-edit" id="cardMeasure" style="border-color:#38bdf8;background:#082f49;color:#e0f2fe;font-size:14px;padding:9px 14px">📏 قياس دقيق بالكارت (الشكل + المقاسات)</button>
       ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس داخل العدسة فقط</button>` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
       ${lastPhoto && customPts ? `<button class="sh-edit" id="reTrace">🔄 إعادة القراءة</button>` : ''}
@@ -1300,6 +1301,7 @@ function renderShapes(){
   const et = $('editTrace'); if (et) et.addEventListener('click', openTraceEditor);
   const rt = $('reTrace'); if (rt) rt.addEventListener('click', reTrace);
   const at = $('aiTap'); if (at) at.addEventListener('click', aiTapMode);
+  const cm = $('cardMeasure'); if (cm) cm.addEventListener('click', cardGuide);
   ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
   $('shName').textContent = SHAPE_NAME[state.shape] || '';
 }
@@ -1989,7 +1991,7 @@ function tapPrior(img, tx, ty){
 }
 async function aiTapMode(){
   if (!lastPhoto) return;
-  const img = lastPhoto.img, cv = img.show || img.cv, W = img.cv.width, H = img.cv.height;
+  const img = lastPhoto.img, cv = img.show || img.cv, W = img.cv.width, H = img.cv.height, sMM = lastPhoto.s || 0;   // px per mm when the photo was straightened with the card
   const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl;overflow:hidden;overscroll-behavior:none';
   ov.innerHTML = `<div id="atMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5">✋ قرّب وحرّك براحتك — وبعدين اختار 👆 نقط أو ✏️ رسم، وفي الآخر شغّل 🧠</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;padding:0 8px 8px">
@@ -2236,9 +2238,115 @@ async function aiTapMode(){
     t2.preview = pc.toDataURL('image/jpeg', 0.85);
     lastTrace = { ...L, mirror }; customPreview = t2.preview;
     lastPhoto = { img, c:[(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2], q:0.99 };
-    useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, 'تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة اللي لمستها — ظبّط A و B بمقاس الذراع');
+    if (sMM){ lastPhoto.s = sMM; const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.A = snap((x1 - x0) / sMM + bev, 0.5, 44, 62); }
+    useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, sMM ? '' : 'تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة اللي لمستها — ظبّط A و B بمقاس الذراع');
+    if (sMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم`; }
   };
 }
+
+/* 📏 Card measuring: frame face-down on white paper + any bank-size card. OpenCV finds the card, the photo is
+   straightened (seen from straight above, true px/mm) → true lens shape + A / B / DBL in mm, no arm reading. */
+const CARD_BEVEL = 1.0;   // the lens is ~0.5 mm bigger than the visible rim opening on each side (groove/bevel)
+function cardGuide(){
+  const ov = document.createElement('div'); ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604f2;display:flex;flex-direction:column;align-items:center;justify-content:center;direction:rtl;padding:16px;gap:12px;overflow:auto';
+  ov.innerHTML = `<svg viewBox="0 0 300 200" style="width:min(88vw,380px);background:#0b1a10;border-radius:14px">
+      <rect x="20" y="22" width="260" height="160" rx="4" fill="#f4f4f2"/>
+      <g fill="none" stroke="#111" stroke-width="6"><path d="M62 78 q38 -14 70 0 q6 30 -10 46 q-30 14 -52 0 q-14 -16 -8 -46z"/><path d="M168 78 q32 -14 70 0 q6 30 -8 46 q-22 14 -52 0 q-16 -16 -10 -46z"/><path d="M132 82 q18 -8 36 0"/></g>
+      <rect x="54" y="66" width="10" height="14" fill="#111"/><rect x="236" y="66" width="10" height="14" fill="#111"/>
+      <g transform="rotate(-4 190 150)"><rect x="160" y="128" width="86" height="54" rx="5" fill="#1e40af"/><rect x="170" y="146" width="12" height="10" rx="2" fill="#facc15"/></g>
+      <text x="150" y="16" fill="#a3e635" font-size="11" text-anchor="middle">ورقة بيضا + الفريم مقلوب + كارت</text></svg>
+    <div style="color:#ecfccb;font-size:14px;line-height:1.9;max-width:380px">
+      1️⃣ حط ورقة بيضا على الترابيزة<br>2️⃣ اقلب الفريم على وشه فوقها، والدراعات مفتوحة لفوق<br>3️⃣ حط أي كارت بمقاس كارت البنك جنبه على نفس الورقة<br>4️⃣ صوّر من فوق، والفريم والكارت باينين كاملين<br>
+      <span style="color:#fde047">💡 مش لازم الصورة تبقى مستوية بالظبط — الكارت بيعدّل الميلان</span><br><span style="color:#93c5fd">🫥 الفريم شفاف؟ نوّر عليه كويس ومن غير ظل</span></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+      <label class="sh-up" style="padding:10px 18px">📷 صوّر<input type="file" accept="image/*" capture="environment" id="cgCam"></label>
+      <label class="sh-up alt" style="padding:10px 18px">🖼️ من الاستديو<input type="file" accept="image/*" id="cgFile"></label>
+      <button id="cgNo" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">إلغاء</button></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('#cgNo').onclick = () => ov.remove();
+  ['cgCam', 'cgFile'].forEach(id => ov.querySelector('#' + id).onchange = e => { const f = e.target.files[0]; ov.remove(); if (f) cardMeasure(f); });
+}
+/* show the photo with the card's 4 corners (found or a default) — drag to fix, with a magnifier */
+function confirmCard(cv0, C0){
+  return new Promise(done => {
+    const W = cv0.width, H = cv0.height, ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#020604;display:flex;flex-direction:column;align-items:center;direction:rtl;overflow:hidden';
+    ov.innerHTML = `<div id="ccMsg" style="color:#d9f99d;font-size:14px;padding:12px 10px 8px;text-align:center;line-height:1.5"></div><canvas id="ccCv" style="touch-action:none"></canvas>
+      <div style="display:flex;gap:10px;padding:12px"><button id="ccNo" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">إلغاء</button>
+      <button id="ccOk" style="padding:9px 22px;border-radius:10px;border:0;background:#a3e635;color:#0b1a0f;font-weight:800">تم ✓ قيس</button></div>`;
+    document.body.appendChild(ov);
+    const c = ov.querySelector('#ccCv'), g = c.getContext('2d'), msg = ov.querySelector('#ccMsg'), dpr = Math.min(2, devicePixelRatio || 1);
+    msg.textContent = C0 ? '✓ لقيت الكارت — اتأكد إن النقط الأربعة على أركانه (اسحبها لو محتاجة)' : '💳 ملقتش الكارت — اسحب النقط الأربعة لأركان الكارت';
+    const top = c.getBoundingClientRect().top, cssW = Math.min(innerWidth, 700), cssH = Math.max(200, innerHeight - top - 66), k = Math.min(cssW / W, cssH / H);
+    c.style.width = W * k + 'px'; c.style.height = H * k + 'px'; c.width = W * k * dpr; c.height = H * k * dpr;
+    let C = C0 ? C0.map(p => p.slice()) : [[W * 0.35, H * 0.4], [W * 0.65, H * 0.4], [W * 0.65, H * 0.6], [W * 0.35, H * 0.6]], drag = -1, at = null;
+    const draw = () => { g.setTransform(dpr * k, 0, 0, dpr * k, 0, 0); g.drawImage(cv0, 0, 0);
+      g.fillStyle = 'rgba(56,189,248,.18)'; g.strokeStyle = '#38bdf8'; g.lineWidth = 2.5 / k; g.beginPath(); C.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fill(); g.stroke();
+      C.forEach(([x, y], i) => { g.fillStyle = i === drag ? '#fde047' : '#fff'; g.strokeStyle = '#0b1a0f'; g.lineWidth = 2 / k; g.beginPath(); g.arc(x, y, 9 / k, 0, 7); g.fill(); g.stroke(); });
+      if (drag >= 0 && at){   // magnifier ×4 in the far top corner
+        const [x, y] = C[drag], R = 70, zx = at[0] < W * k / 2 ? W * k - R - 8 : R + 8; g.setTransform(dpr, 0, 0, dpr, 0, 0); g.save(); g.beginPath(); g.arc(zx, R + 8, R, 0, 7); g.clip();
+        g.drawImage(cv0, x - R / (4 * k), y - R / (4 * k), R / (2 * k), R / (2 * k), zx - R, 8, R * 2, R * 2);
+        g.strokeStyle = '#fde047'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(zx - 12, R + 8); g.lineTo(zx + 12, R + 8); g.moveTo(zx, R - 4); g.lineTo(zx, R + 20); g.stroke(); g.restore();
+        g.strokeStyle = '#fde047'; g.lineWidth = 2; g.beginPath(); g.arc(zx, R + 8, R, 0, 7); g.stroke(); } };
+    draw();
+    const pos = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H, e.clientX - r.left, e.clientY - r.top]; };
+    let off = [0, 0];
+    c.addEventListener('pointerdown', e => { const [x, y, cx2, cy2] = pos(e); let bd = 34 / k; drag = -1; C.forEach((p, i) => { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd){ bd = d; drag = i; } });
+      if (drag >= 0){ c.setPointerCapture(e.pointerId); off = [C[drag][0] - x, C[drag][1] - y]; at = [cx2, cy2]; draw(); } });
+    c.addEventListener('pointermove', e => { if (drag < 0) return; const [x, y, cx2, cy2] = pos(e); C[drag] = [Math.max(0, Math.min(W, x + off[0])), Math.max(0, Math.min(H, y + off[1]))]; at = [cx2, cy2]; draw(); });
+    c.addEventListener('pointerup', () => { drag = -1; at = null; draw(); });
+    ov.querySelector('#ccNo').onclick = () => { ov.remove(); done(null); };
+    ov.querySelector('#ccOk').onclick = () => { ov.remove(); done(C); };
+  });
+}
+let cardMod = null;
+async function cardMeasure(file){
+  setShTabPhoto();
+  const note = $('shNote'), say = t => { if ($('shNote')) $('shNote').textContent = t; }, tick = () => new Promise(r => setTimeout(r, 30));
+  say('📏 بجهز أداة القياس… (أول مرة بس محتاجة نت)'); await tick();
+  let cv;
+  try{ cardMod = cardMod || await import('./ai/card-measure.js'); cv = await cardMod.loadCV(); }
+  catch(e){ console.error(e); say('⚠️ أداة القياس لسه متحملتش — افتح النت مرة وجرّب تاني'); return; }
+  const raw = await loadImageData(file, 2400);
+  say('💳 بدور على الكارت…'); await tick();
+  let C = null; try{ C = cardMod.findCard(cv, raw.cv); }catch(e){ console.error(e); }
+  C = await confirmCard(raw.cv, C); if (!C){ say('اتلغى القياس'); return; }
+  say('📐 بعدّل ميلان الصورة…'); await tick();
+  const R = cardMod.rectify(cv, raw.cv, C, { maxSide:2200 });
+  // the card is painted paper-white so it is never taken for a lens
+  { const g2 = R.canvas.getContext('2d', { willReadFrequently:true }), m = 4 * R.s, x0 = Math.max(0, R.card.x0 - m), y0 = Math.max(0, R.card.y0 - m), x1 = Math.min(R.canvas.width, R.card.x1 + m), y1 = Math.min(R.canvas.height, R.card.y1 + m);
+    const ring = g2.getImageData(Math.max(0, x0 - 12), Math.max(0, y0 - 12), Math.min(R.canvas.width, x1 + 12) - Math.max(0, x0 - 12), Math.min(R.canvas.height, y1 + 12) - Math.max(0, y0 - 12)).data, L = [];
+    for (let i = 0; i < ring.length; i += 16) L.push([ring[i], ring[i + 1], ring[i + 2], ring[i] + ring[i + 1] + ring[i + 2]]); L.sort((a, b) => b[3] - a[3]); const q = L[Math.floor(L.length * 0.2)] || [235, 235, 235];
+    g2.fillStyle = `rgb(${q[0]},${q[1]},${q[2]})`; g2.fillRect(x0, y0, x1 - x0, y1 - y0); }
+  trHi = R.canvas;
+  // detection runs on a ~1100 px copy (what the tracer is tuned for)
+  const kk = Math.min(1, 1100 / Math.max(R.canvas.width, R.canvas.height)), sc = document.createElement('canvas'); sc.width = Math.round(R.canvas.width * kk); sc.height = Math.round(R.canvas.height * kk);
+  const sg = sc.getContext('2d', { willReadFrequently:true }); sg.drawImage(R.canvas, 0, 0, sc.width, sc.height);
+  const img = { cv:sc, ctx:sg, data:sg.getImageData(0, 0, sc.width, sc.height) }, sPx = R.s * kk;   // px per mm on the detection copy
+  say('🔎 بدور على الفريم…'); await tick();
+  let frames = []; try{ frames = findFrames(img).map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts, rim:f.mirror ? mirrorArr(f.tr.rim) : f.tr.rim })); }catch(e){ console.error(e); }
+  lastPhoto = { img, c:[0.5, 0.5], s:sPx }; aiLoad(null);
+  if (!frames.length){ say('ملقتش الفريم لوحده — المس داخل العدسة 👆 (المقاسات هتتحسب بالكارت)'); renderShapes(); aiTapMode(); return; }
+  frames.sort((a, b) => (b.paired - a.paired) || (b.tr.quality - a.tr.quality));
+  let pick = frames.length === 1 || (frames[0].paired && !frames[1].paired) ? 0 : await chooseFrame(frames);
+  if (pick === null){ say('اتلغى الاختيار'); return; }
+  if (pick === 'manual'){ renderShapes(); aiTapMode(); return; }
+  const f = frames[pick];
+  if (await aiRefine(img, f, null)) f.pts = f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts;
+  const xs = f.tr.pts.map(p => p[0]), ys = f.tr.pts.map(p => p[1]), wPx = Math.max(...xs) - Math.min(...xs), hPx = Math.max(...ys) - Math.min(...ys);
+  const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL, A = wPx / sPx + bev, B = hPx / sPx + bev, D = f.bridge && f.bridge.dbl ? f.bridge.dbl * wPx / sPx - bev : null;
+  lastTrace = { ...f.last, mirror:!!f.mirror }; customPreview = f.tr.preview;
+  lastPhoto = { img, c:[(f.box.x0 + f.box.x1) / 2, (f.box.y0 + f.box.y1) / 2], q:f.tr.quality, s:sPx };
+  customBridge = f.bridge && f.bridge.top !== undefined ? f.bridge : null;
+  state.A = snap(A, 0.5, 44, 62);
+  useTrace({ ...f.tr, pts:f.pts, rim:f.rim }, '');
+  state.B = snap(B, 0.5, 26, 50); if (D) state.DBL = snap(D, 0.5, 12, 24);
+  syncUI(); requestRebuild();
+  const out = A < 44 || A > 62 ? ' ⚠️ A برّه مدى البرنامج' : '';
+  say(`📏 تم ✓ مقاس بالكارت: A ${A.toFixed(1)} • B ${B.toFixed(1)}${D ? ` • DBL ${D.toFixed(1)}` : ''} مم${out} — لو الشكل محتاج تظبيط: 👆 أو ✏️`);
+  window.__cardRes = { A, B, D, q:f.tr.quality };   // test hook
+}
+function setShTabPhoto(){ if (shTab !== 'photo'){ shTab = 'photo'; renderShapes(); } }
 async function traceFrame(file){
   if (!file) return;
   const note = $('shNote');
@@ -3231,7 +3339,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 73;
+const APP_V = 74;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
