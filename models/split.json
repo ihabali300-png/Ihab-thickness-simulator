@@ -1,0 +1,4 @@
+{
+ "Xenova/sam-vit-base/onnx/vision_encoder_fp16.onnx": 4,
+ "Xenova/sam-vit-base/onnx/vision_encoder_quantized.onnx": 3
+}
