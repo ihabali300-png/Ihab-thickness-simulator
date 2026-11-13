@@ -1946,6 +1946,32 @@ async function aiLoad(note){
 /* 🎯 Edge snap: whatever drew the outline (tracer, AI, a shape, your finger), pull every one of 360 rays to the
    real rim edge in the sharpest copy of the photo — only within ±band, with a smoothness-aware path (DP) so one
    reflection can't drag a single ray out. Sub-pixel, then lightly smoothed. Returns points in the same frame. */
+
+/* 👃 nose pads / a temple seen through the lens make shallow dents in the outline (2–3 mm). Lens shapes are convex,
+   so every dent shallower than maxD (px) is filled up to the convex hull; deeper ones are kept (a real design).
+   Works on any closed outline; returns n points (same order/direction as the input). */
+function fillDents(P, maxD, n){
+  n = n || P.length;
+  const S = P.map(p => [p[0], p[1]]).sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = []; for (const p of S){ while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = S.length - 1; i >= 0; i--){ const p = S[i]; while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  const Hh = lo.slice(0, -1).concat(up.slice(0, -1));
+  let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length;
+  const ray = (Q, t) => { const ux = Math.cos(t), uy = Math.sin(t); let best = 0;
+    for (let i = 0, j = Q.length - 1; i < Q.length; j = i++){ const ax = Q[j][0] - cx, ay = Q[j][1] - cy, ex = Q[i][0] - Q[j][0], ey = Q[i][1] - Q[j][1], den = ux * ey - uy * ex; if (Math.abs(den) < 1e-9) continue;
+      const sR = (ax * ey - ay * ex) / den, u = (ax * uy - ay * ux) / den; if (sR > 0 && u >= 0 && u <= 1 && sR > best) best = sR; } return best; };
+  // keep the input's direction: angle of point 0 and winding
+  let ar = 0; for (let i = 0; i < P.length; i++){ const a = P[i], b = P[(i + 1) % P.length]; ar += (a[0] - cx) * (b[1] - cy) - (b[0] - cx) * (a[1] - cy); }
+  const t0 = Math.atan2(P[0][1] - cy, P[0][0] - cx), dir = ar >= 0 ? 1 : -1, R = [], Rh = [];
+  for (let i = 0; i < n; i++){ const t = t0 + dir * i / n * 2 * Math.PI; R.push(ray(P, t)); Rh.push(ray(Hh, t)); }
+  // a dent = a run where the hull is outside the outline; fill the whole run only if its deepest point is < maxD
+  const gap = R.map((r, i) => Rh[i] - r), out = R.slice(), thr = Math.max(0.6, maxD * 0.04);
+  let i = 0; while (i < n && gap[i] > thr) i++;   // start outside a dent
+  for (let k = 0; k < n; k++){ const a = (i + k) % n; if (gap[a] <= thr) continue;
+    let e = k; while (e < n && gap[(i + e) % n] > thr) e++; let deep = 0; for (let q = k; q < e; q++) deep = Math.max(deep, gap[(i + q) % n]);
+    if (deep < maxD) for (let q = k; q < e; q++) out[(i + q) % n] = Rh[(i + q) % n]; k = e; }
+  return out.map((r, q) => { const t = t0 + dir * q / n * 2 * Math.PI; return [cx + Math.cos(t) * r, cy + Math.sin(t) * r]; });
+}
 function snapEdge(src, P, opt = {}){
   const N = 360, band = opt.band || 0.05;
   let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length;
@@ -2305,6 +2331,7 @@ async function aiTapMode(){
    and — when the photo was straightened with the card (sMM px/mm) — A / B (and DBL) in mm */
 function applyLensOutline(img, cv, P, sMM, dblMM, msgNoMM){
   const W = img.cv.width, H = img.cv.height, sx = W / cv.width, sy = H / cv.height;
+  if (sMM) try{ P = fillDents(P, 4 * sMM, 360); }catch(e){ console.error(e); }   // nose pads seen through the lens
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
   const pw = (x1 - x0) * 0.12, ph = (y1 - y0) * 0.12, box = { x0:Math.max(0, (x0 - pw) / W), x1:Math.min(1, (x1 + pw) / W), y0:Math.max(0, (y0 - ph) / H), y1:Math.min(1, (y1 + ph) / H) };
   const mirror = (x0 + x1) / 2 / W < 0.45;   // a lens on the left of the photo is the left lens
@@ -2457,6 +2484,7 @@ async function cardMeasure(file, pre){
   const f = frames[pick];
   say('🧠 بحدد الحافة بدقة…'); await tick();
   if (!await aiRefine(img, f, null)) try{ snapTrace(img, f, 0.06); }catch(e){ console.error(e); }
+  try{ f.tr = { ...f.tr, pts:fillDents(f.tr.pts, 4 * sPx) }; }catch(e){ console.error(e); }   // nose pads seen through the lens
   f.pts = f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts;
   const xs = f.tr.pts.map(p => p[0]), ys = f.tr.pts.map(p => p[1]), wPx = Math.max(...xs) - Math.min(...xs), hPx = Math.max(...ys) - Math.min(...ys);
   const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL, A = wPx / sPx + bev, B = hPx / sPx + bev, D = f.bridge && f.bridge.dbl ? f.bridge.dbl * wPx / sPx - bev : null;
@@ -3474,7 +3502,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 82;
+const APP_V = 83;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
