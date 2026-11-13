@@ -2562,7 +2562,7 @@ async function traceFrame(file){
     cardMod = cardMod || await import('./ai/card-measure.js'); const cv = await cardMod.loadCV();
     const raw = await loadImageData(file, 2400), C = cardMod.findCard(cv, raw.cv);
     if (C){ note.textContent = '💳 لقيت كارت في الصورة — هقيس بيه'; if (await cardMeasure(file, { raw, C }) !== false) return; }   // 🚫 «مفيش كارت» → normal reading
-  }catch(e){ console.warn('card check skipped', e); }
+  }catch(e){ console.warn('card check skipped', e); note.textContent = '⚠️ أداة قياس الكارت متحمّلتش (محتاجة نت أول مرة) — بقرا الصورة عادي…'; await new Promise(r => setTimeout(r, 1200)); }
   const sample = await samplePromise;
   try{
     const lim = sample ? (typeof sample.limits === 'function' ? await sample.limits() : { images:true }) : null;
@@ -3553,7 +3553,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 87;
+const APP_V = 88;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
