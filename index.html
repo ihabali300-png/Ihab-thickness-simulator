@@ -3402,7 +3402,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 76;
+const APP_V = 77;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
@@ -3413,10 +3413,10 @@ const APP_V = 76;
     $u('updList').innerHTML = (j.notes || []).map(n => `<li>${n}</li>`).join('') || '<li>تحسينات عامة</li>';
     // 📦 how big is it: صغير / متوسط / كبير (+ AI files that come later, only when that tool is used)
     let sz = $u('updSize'); if (!sz){ sz = document.createElement('div'); sz.id = 'updSize'; sz.style.cssText = 'margin:2px 0 8px;font-size:13px;color:#bef264;direction:rtl'; $u('updList').before(sz); }
-    const kb = +j.kb || 0, lvl = j.size || '', col = { 'صغير':'#86efac', 'متوسط':'#fde047', 'كبير':'#fb923c' }[lvl] || '#bef264';
-    const txt = kb ? (kb < 1024 ? kb + ' كيلو' : (kb / 1024).toFixed(1) + ' ميجا') : '';
-    sz.innerHTML = done || !lvl ? '' : `📦 حجم التحديث: <b style="color:${col}">${lvl}</b> (${txt})${lvl === 'كبير' ? ' — يفضّل على واي فاي' : ''}`
-      + (j.lazyMB ? `<br><span style="color:#93c5fd">📥 وفيه ${j.lazyMB} ميجا للذكاء الاصطناعي، بيتحمّلوا مرة واحدة أول ما تستخدمه</span>` : '');
+    const kb = +j.totalKB || +j.kb || 0, mb = kb / 1024, lvl = j.totalKB ? (mb < 10 ? 'صغير' : mb <= 100 ? 'متوسط' : 'كبير') : (j.size || ''), col = { 'صغير':'#86efac', 'متوسط':'#fde047', 'كبير':'#fb923c' }[lvl] || '#bef264';
+    const fmt = k => k < 1024 ? k + ' كيلو' : (k / 1024).toFixed(1) + ' ميجا';
+    sz.innerHTML = done || !lvl ? '' : `📦 حجم التحديث: <b style="color:${col}">${fmt(kb)}</b> — ${lvl}${lvl === 'كبير' ? ' (يفضّل على واي فاي)' : ''}`
+      + (j.lazyMB ? `<br><span style="color:#93c5fd">📥 منهم ${(+j.lazyMB).toFixed(1)} ميجا للذكاء الاصطناعي، بيتحمّلوا مرة واحدة أول ما تستخدمه</span>` : '');
     card.querySelector('.uh').firstChild.textContent = done ? '✅ اتحدّث — الجديد في ' : '🆕 الجديد في التحديث ';
     $u('updNow').style.display = done ? 'none' : ''; $u('updLater').textContent = done ? 'تمام' : 'بعدين';
     card.classList.add('on');
