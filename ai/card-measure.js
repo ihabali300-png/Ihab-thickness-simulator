@@ -67,6 +67,7 @@ export function findCard(cv, canvas){
             for (let q = 0; q < 4; q++){ const A = P[q], B = P[(q + 1) % 4], dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy); dm = Math.min(dm, Math.abs((x - A[0]) * dy - (y - A[1]) * dx) / L); }
             if (dm < tol) onLine++; }
           const straight = onLine / Math.ceil(c.rows / 2);
+          if (typeof window !== 'undefined' && window.__dbg) window.__dbg.push([+asp.toFixed(2), +fill.toFixed(2), +straight.toFixed(2), +(area / (W * H)).toFixed(3), touch]);
           if (asp > 1.38 && asp < 1.82 && fill > 0.9 && straight > 0.93 && area < 0.25 * W * H && !touch){
             // the card is coloured / darker than the white paper around it; lens openings and the paper are bright
             let x0 = W, x1 = 0, y0 = H, y1 = 0; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });

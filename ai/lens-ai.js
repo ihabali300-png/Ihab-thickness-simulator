@@ -106,3 +106,54 @@ export async function segmentLens(cv, box, pos = [], neg = [], prior = null, lim
   const agree = used.reduce((s2, v) => s2 + v, 0) / 360;
   return { pts, score:best.score, agree, cx, cy };
 }
+
+/* 🔎 find the lenses by itself on a photo straightened with the card (sPx px per mm): a grid of single-point prompts
+   on one image embedding; keep masks that are lens-sized in mm, closed, fairly full, not the card; pair two alike side by side */
+export async function autoLenses(cv, sPx, avoid, onProg){
+  await loadAI();
+  const { emb, inp } = await embed(cv);
+  const [rh, rw] = inp.reshaped_input_sizes[0], W0 = cv.width, H0 = cv.height, step = 16 * sPx, cands = [];
+  const pts = []; for (let y = step / 2; y < H0; y += step) for (let x = step / 2; x < W0; x += step){
+    if (avoid && x > avoid.x0 - 5 * sPx && x < avoid.x1 + 5 * sPx && y > avoid.y0 - 5 * sPx && y < avoid.y1 + 5 * sPx) continue; pts.push([x, y]); }
+  const inside = (c, x, y) => c.m && x >= c.bx0 && x <= c.bx1 && y >= c.by0 && y <= c.by1 && c.m[Math.floor((y - c.by0) / 2) * c.mw + Math.floor((x - c.bx0) / 2)];
+  for (let i = 0; i < pts.length; i++){
+    if (onProg) onProg(i / pts.length);
+    const [px, py] = pts[i]; if (cands.some(c => inside(c, px, py))) continue;   // already inside a found lens
+    const feeds = { ...emb, input_points:new T.Tensor('float32', [px / W0 * rw, py / H0 * rh], [1, 1, 1, 2]), input_labels:new T.Tensor('int64', [1n], [1, 1, 1]) };
+    const out = await model(feeds);
+    const masks = await processor.post_process_masks(out.pred_masks, inp.original_sizes, inp.reshaped_input_sizes);
+    const M = masks[0], dims = M.dims, H = dims[dims.length - 2], W = dims[dims.length - 1], nm = dims[dims.length - 3], data = M.data, sc = out.iou_scores.data;
+    for (let k = 0; k < nm; k++){
+      let area = 0, x0 = W, x1 = 0, y0 = H, y1 = 0;
+      for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (data[k * W * H + y * W + x]){ area++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      if (!area) continue; area *= 4;
+      const wm = (x1 - x0) / sPx, hm = (y1 - y0) / sPx, fill = area / Math.max(1, (x1 - x0) * (y1 - y0)), edge = x0 < 3 || y0 < 3 || x1 > W - 4 || y1 > H - 4;
+      if (wm < 32 || wm > 72 || hm < 20 || hm > 62 || wm / hm < 0.85 || wm / hm > 2.4 || fill < 0.6 || fill > 0.96 || edge || sc[k] < 0.6) continue;
+      if (avoid){ const ix = Math.max(0, Math.min(x1, avoid.x1) - Math.max(x0, avoid.x0)), iy = Math.max(0, Math.min(y1, avoid.y1) - Math.max(y0, avoid.y0)); if (ix * iy > 0.1 * (x1 - x0) * (y1 - y0)) continue; }
+      // keep a low-res copy of the mask (to skip grid points inside it) and the outline (360 rays from its centre)
+      const mw = Math.ceil((x1 - x0 + 1) / 2), mh = Math.ceil((y1 - y0 + 1) / 2), m = new Uint8Array(mw * mh); let cx = 0, cy = 0, n = 0;
+      for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) if (data[k * W * H + y * W + x]){ m[((y - y0) / 2 | 0) * mw + ((x - x0) / 2 | 0)] = 1; cx += x; cy += y; n++; }
+      cx /= n; cy /= n;
+      const at = (x, y) => x >= 0 && y >= 0 && x < W && y < H && data[k * W * H + (y | 0) * W + (x | 0)], R = Math.hypot(x1 - x0, y1 - y0) * 0.6, rr = new Float32Array(360);
+      for (let a = 0; a < 360; a++){ const t = a / 180 * Math.PI, ux = Math.cos(t), uy = -Math.sin(t); let last = 0; for (let s = 0; s < R; s += 0.5) if (at(cx + ux * s, cy + uy * s)) last = s; rr[a] = last; }
+      const med = Array.from(rr, (_, a) => { const w = []; for (let q = -4; q <= 4; q++) w.push(rr[(a + q + 360) % 360]); w.sort((p, q) => p - q); return w[4]; });
+      const P = med.map((r, a) => { const t = a / 180 * Math.PI; return [cx + Math.cos(t) * r, cy - Math.sin(t) * r]; });
+      const sx = W0 / W, sy = H0 / H;
+      cands.push({ s:sc[k] - Math.abs(fill - 0.8) * 0.5, cx:cx * sx, cy:cy * sy, bx0:x0 * sx, bx1:x1 * sx, by0:y0 * sy, by1:y1 * sy, mw, m, pts:P.map(([x, y]) => [x * sx, y * sy]) });
+    }
+    // de-duplicate: overlapping finds → keep the better one
+    for (let a = 0; a < cands.length; a++) for (let b = cands.length - 1; b > a; b--){ const A = cands[a], B = cands[b];
+      const ix = Math.max(0, Math.min(A.bx1, B.bx1) - Math.max(A.bx0, B.bx0)), iy = Math.max(0, Math.min(A.by1, B.by1) - Math.max(A.by0, B.by0)), u = (A.bx1 - A.bx0) * (A.by1 - A.by0) + (B.bx1 - B.bx0) * (B.by1 - B.by0) - ix * iy;
+      if (ix * iy / u > 0.5){ if (B.s > A.s) cands[a] = B; cands.splice(b, 1); } }
+  }
+  if (onProg) onProg(1);
+  // best pair: same height line, alike in size, a bridge gap of 8–28 mm between them
+  let best = null;
+  for (const A of cands) for (const B of cands){ if (A === B || A.cx > B.cx) continue;
+    const wa = A.bx1 - A.bx0, wb = B.bx1 - B.bx0, ha = A.by1 - A.by0, hb = B.by1 - B.by0, gap = (B.bx0 - A.bx1) / sPx;
+    if (Math.abs(A.cy - B.cy) / sPx > 10 || wa / wb < 0.82 || wa / wb > 1.22 || ha / hb < 0.82 || ha / hb > 1.22 || gap < 8 || gap > 28) continue;
+    const s = A.s + B.s - Math.abs(Math.log(wa / wb)) - Math.abs(Math.log(ha / hb)); if (!best || s > best.s) best = { s, A, B, gap:B.bx0 - A.bx1 }; }
+  if (best) return { lenses:[best.A, best.B], gap:best.gap };
+  cands.sort((a, b) => b.s - a.s);
+  return { lenses:cands.slice(0, 1), gap:0 };
+}

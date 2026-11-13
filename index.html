@@ -2297,27 +2297,37 @@ async function aiTapMode(){
   ov.querySelector('#atOk').onclick = () => {
     if (!res) return; close();
     const sx = W / cv.width, sy = H / cv.height, P = res.pts.map(([x, y]) => [x * sx, y * sy]);
-    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
-    const pw = (x1 - x0) * 0.12, ph = (y1 - y0) * 0.12, box = { x0:Math.max(0, (x0 - pw) / W), x1:Math.min(1, (x1 + pw) / W), y0:Math.max(0, (y0 - ph) / H), y1:Math.min(1, (y1 + ph) / H) };
-    const mirror = (x0 + x1) / 2 / W < 0.45;   // a lens on the left of the photo is the left lens
-    const tr = traceLens(img, box, { side:mirror ? -1 : 1 }), L = lastTrace;
-    const pts = []; for (let a = 0; a < 180; a++){ const q = P[a * 2]; pts.push([q[0] - L.cx, L.cy - q[1]]); }
-    const t2 = { ...tr, pts, quality:0.99, ai:true };
-    // preview
-    const pc = document.createElement('canvas'), pad = 1.5, px = Math.max(0, L.cx - L.hw * pad), py = Math.max(0, L.cy - L.hh * pad);
-    const sw = Math.min(W - px, L.hw * 2 * pad), sh = Math.min(H - py, L.hh * 2 * pad), sc = 300 / sw; pc.width = 300; pc.height = Math.round(sh * sc);
-    const pg = pc.getContext('2d'); pg.drawImage(cv, px / sx, py / sy, sw / sx, sh / sy, 0, 0, pc.width, pc.height);
-    pg.strokeStyle = '#a3e635'; pg.lineWidth = 3; pg.beginPath(); P.forEach(([x, y], i) => i ? pg.lineTo((x - px) * sc, (y - py) * sc) : pg.moveTo((x - px) * sc, (y - py) * sc)); pg.closePath(); pg.stroke();
-    pg.fillStyle = '#000a'; pg.fillRect(0, 0, 92, 20); pg.fillStyle = '#d9f99d'; pg.font = 'bold 12px sans-serif'; pg.fillText('🧠 AI ✓', 6, 14);
-    t2.preview = pc.toDataURL('image/jpeg', 0.85);
-    lastTrace = { ...L, mirror }; customPreview = t2.preview;
-    lastPhoto = { img, c:[(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2], q:0.99 };
-    const aMM = sMM ? (x1 - x0) / sMM + (state.frame === 'rimless' ? 0 : CARD_BEVEL) : 0, okMM = aMM > 36 && aMM < 70;
-    if (sMM && okMM){ lastPhoto.s = sMM; state.A = snap(aMM, 0.5, 44, 62); }
-    useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, sMM ? '' : 'تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة اللي لمستها — ظبّط A و B بمقاس الذراع');
-    if (sMM && okMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم`; }
-    else if (sMM) $('shNote').textContent = `⚠️ الشكل اتطبّق، بس المقاس طلع غلط (A ${aMM.toFixed(0)} مم) — غالباً الكارت اتحدد غلط`;
+    applyLensOutline(img, cv, P, sMM, null, 'تم ✓ 🧠 الذكاء الاصطناعي حدد العدسة اللي لمستها — ظبّط A و B بمقاس الذراع');
   };
+}
+
+/* apply one lens outline P (photo px, y down) as the frame shape: rim data from the tracer around it, preview,
+   and — when the photo was straightened with the card (sMM px/mm) — A / B (and DBL) in mm */
+function applyLensOutline(img, cv, P, sMM, dblMM, msgNoMM){
+  const W = img.cv.width, H = img.cv.height, sx = W / cv.width, sy = H / cv.height;
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+  const pw = (x1 - x0) * 0.12, ph = (y1 - y0) * 0.12, box = { x0:Math.max(0, (x0 - pw) / W), x1:Math.min(1, (x1 + pw) / W), y0:Math.max(0, (y0 - ph) / H), y1:Math.min(1, (y1 + ph) / H) };
+  const mirror = (x0 + x1) / 2 / W < 0.45;   // a lens on the left of the photo is the left lens
+  const tr = traceLens(img, box, { side:mirror ? -1 : 1 }), L = lastTrace;
+  const pts = []; for (let a = 0; a < 180; a++){ const q = P[a * 2]; pts.push([q[0] - L.cx, L.cy - q[1]]); }
+  const t2 = { ...tr, pts, quality:0.99, ai:true };
+  // preview
+  const pc = document.createElement('canvas'), pad = 1.5, px = Math.max(0, L.cx - L.hw * pad), py = Math.max(0, L.cy - L.hh * pad);
+  const sw = Math.min(W - px, L.hw * 2 * pad), sh = Math.min(H - py, L.hh * 2 * pad), sc = 300 / sw; pc.width = 300; pc.height = Math.round(sh * sc);
+  const pg = pc.getContext('2d'); pg.drawImage(cv, px / sx, py / sy, sw / sx, sh / sy, 0, 0, pc.width, pc.height);
+  pg.strokeStyle = '#a3e635'; pg.lineWidth = 3; pg.beginPath(); P.forEach(([x, y], i) => i ? pg.lineTo((x - px) * sc, (y - py) * sc) : pg.moveTo((x - px) * sc, (y - py) * sc)); pg.closePath(); pg.stroke();
+  pg.fillStyle = '#000a'; pg.fillRect(0, 0, 92, 20); pg.fillStyle = '#d9f99d'; pg.font = 'bold 12px sans-serif'; pg.fillText('🧠 AI ✓', 6, 14);
+  t2.preview = pc.toDataURL('image/jpeg', 0.85);
+  lastTrace = { ...L, mirror }; customPreview = t2.preview;
+  lastPhoto = { img, c:[(box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2], q:0.99 };
+  const aMM = sMM ? (x1 - x0) / sMM + (state.frame === 'rimless' ? 0 : CARD_BEVEL) : 0, okMM = aMM > 36 && aMM < 70;
+  if (sMM && okMM){ lastPhoto.s = sMM; state.A = snap(aMM, 0.5, 44, 62); }
+  useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, sMM ? '' : msgNoMM);
+  if (sMM && okMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم`; }
+  else if (sMM) $('shNote').textContent = `⚠️ الشكل اتطبّق، بس المقاس طلع غلط (A ${aMM.toFixed(0)} مم) — غالباً الكارت اتحدد غلط`;
+  if (sMM && okMM && dblMM && dblMM > 10 && dblMM < 26){ state.DBL = snap(dblMM - (state.frame === 'rimless' ? 0 : CARD_BEVEL), 0.5, 12, 24); syncUI(); requestRebuild();
+    $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} • DBL ${state.DBL} مم`; }
+  return okMM;
 }
 
 /* 📏 Card measuring: frame face-down on white paper + any bank-size card. OpenCV finds the card, the photo is
@@ -2342,7 +2352,7 @@ function cardGuide(){
       <g transform="rotate(-4 190 150)"><rect x="160" y="128" width="86" height="54" rx="5" fill="#1e40af"/><rect x="170" y="146" width="12" height="10" rx="2" fill="#facc15"/></g>
       <text x="150" y="16" fill="#a3e635" font-size="11" text-anchor="middle">ورقة بيضا + الفريم مقلوب + كارت</text></svg>
     <div style="color:#ecfccb;font-size:14px;line-height:1.9;max-width:380px">
-      1️⃣ حط ورقة بيضا على الترابيزة<br>2️⃣ اقلب الفريم على وشه فوقها، والدراعات مفتوحة لفوق<br>3️⃣ حط أي كارت بمقاس كارت البنك جنبه على نفس الورقة (مش فوق العدسات)<br>4️⃣ صوّر من فوق، والفريم والكارت باينين كاملين<br>
+      1️⃣ حط ورقة بيضا على الترابيزة<br>2️⃣ حط الفريم نايم على الورقة (مش في إيدك) — مقلوب على وشه أو وشه لفوق<br>3️⃣ حط أي كارت بمقاس كارت البنك جنبه على نفس السطح (مش فوق العدسات)<br>4️⃣ صوّر من فوق، والفريم والكارت باينين كاملين<br>
       <span style="color:#fde047">💡 مش لازم الصورة تبقى مستوية بالظبط — الكارت بيعدّل الميلان</span><br><span style="color:#93c5fd">🫥 الفريم شفاف؟ نوّر عليه كويس ومن غير ظل</span></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
       <label class="sh-up" style="padding:10px 18px">📷 صوّر<input type="file" accept="image/*" capture="environment" id="cgCam"></label>
@@ -2424,7 +2434,22 @@ async function cardMeasure(file, pre){
   let found = []; try{ found = findFrames(hidden).filter(f => !onCard(f)); if (!found.length) found = findFrames(img).filter(f => !onCard(f)); }catch(e){ console.error(e); }
   let frames = []; try{ frames = found.map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts, rim:f.mirror ? mirrorArr(f.tr.rim) : f.tr.rim })); }catch(e){ console.error(e); }
   lastPhoto = { img, c:[0.5, 0.5], s:sPx }; aiLoad(null);
-  if (!frames.length){ say('ملقتش الفريم لوحده — المس داخل العدسة 👆 (المقاسات هتتحسب بالكارت)'); renderShapes(); aiTapMode(); return; }
+  if (!frames.length){
+    // 🧠 the classic tracer missed it → the AI looks for the lenses by itself: we know the mm scale, so only lens-sized regions count
+    const am = await aiLoad($('shNote'));
+    if (am && am.autoLenses){
+      say('🧠 الذكاء بيدوّر على العدسات… 0%');
+      let r = null; try{ r = await am.autoLenses(sc, sPx, cb, p => say(`🧠 الذكاء بيدوّر على العدسات… ${Math.round(p * 100)}%`)); }catch(e){ console.error(e); }
+      if (r && r.lenses.length){
+        // the lens on the right of the (front-view) photo, snapped to the edge on the sharp copy
+        const pick = r.lenses.slice().sort((a, b) => b.cx - a.cx)[0];
+        let P = pick.pts; try{ const k2 = R.canvas.width / W2; P = snapEdge(R.canvas, P.map(([x, y]) => [x * k2, y * k2]), { band:0.04 }).map(([x, y]) => [x / k2, y / k2]); }catch(e){}
+        lastPhoto = { img, c:[pick.cx / W2, pick.cy / H2], s:sPx };
+        const ok = applyLensOutline(img, sc, P, sPx, r.lenses.length > 1 ? r.gap / sPx : null, '');
+        if (ok){ if (r.lenses.length < 2) say(`📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم — 🧠 لقيت عدسة واحدة، فالبردج متقاسش`); return; }
+      }
+    }
+    say('ملقتش الفريم لوحده — المس داخل العدسة 👆 (المقاسات هتتحسب بالكارت)'); renderShapes(); aiTapMode(); return; }
   frames.sort((a, b) => (b.paired - a.paired) || (b.tr.quality - a.tr.quality));
   let pick = frames.length === 1 || (frames[0].paired && !frames[1].paired) ? 0 : await chooseFrame(frames);
   if (pick === null){ say('اتلغى الاختيار'); return; }
@@ -3449,7 +3474,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 80;
+const APP_V = 81;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
