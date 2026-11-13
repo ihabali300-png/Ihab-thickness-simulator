@@ -61,7 +61,13 @@ export function findCard(cv, canvas){
           let asp = (sd[0] + sd[2]) / (sd[1] + sd[3]); if (asp < 1) asp = 1 / asp;
           const rr = cv.minAreaRect(c), fill = area / Math.max(1, rr.size.width * rr.size.height);
           const touch = P.some(p => p[0] < 3 || p[1] < 3 || p[0] > W - 4 || p[1] > H - 4);
-          if (asp > 1.22 && asp < 2.05 && fill > 0.86 && !touch){
+          // straight sides: almost every contour point lies on one of the 4 sides (lens openings are curved)
+          let onLine = 0; const tol = Math.max(2, 0.012 * peri);
+          for (let j = 0; j < c.rows; j += 2){ const x = c.data32S[j * 2], y = c.data32S[j * 2 + 1]; let dm = 1e9;
+            for (let q = 0; q < 4; q++){ const A = P[q], B = P[(q + 1) % 4], dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy); dm = Math.min(dm, Math.abs((x - A[0]) * dy - (y - A[1]) * dx) / L); }
+            if (dm < tol) onLine++; }
+          const straight = onLine / Math.ceil(c.rows / 2);
+          if (asp > 1.38 && asp < 1.82 && fill > 0.9 && straight > 0.93 && area < 0.25 * W * H && !touch){
             // the card is coloured / darker than the white paper around it; lens openings and the paper are bright
             let x0 = W, x1 = 0, y0 = H, y1 = 0; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
             const inside = (x, y) => { let r = false; for (let a = 0, b = 3; a < 4; b = a++){ const A = P[a], B = P[b]; if ((A[1] > y) !== (B[1] > y) && x < (B[0] - A[0]) * (y - A[1]) / (B[1] - A[1]) + A[0]) r = !r; } return r; };
@@ -78,7 +84,7 @@ export function findCard(cv, canvas){
     }
   } finally { [src, g, e, cs, hi, ker].forEach(m => m.delete()); }
   cands.sort((a, b) => b.score - a.score);
-  const best = cands[0]; if (!best || best.score < 0.14) return null;   // a lens opening (paper seen through it) has almost no contrast/colour → never taken for the card
+  const best = cands[0]; if (!best || best.score < 0.18) return null;   // a lens opening (paper seen through it) has almost no contrast/colour → never taken for the card
   // refine: a straight line through each side's contour points (skipping the rounded corners) → corners = line crossings
   const P = best.P, L = [];
   for (let j = 0; j < 4; j++){
@@ -88,6 +94,13 @@ export function findCard(cv, canvas){
     L.push(sel.length > 8 ? fitLine(sel) : [A[0], A[1], dx / len, dy / len]);
   }
   const R = [0, 1, 2, 3].map(j => cross(L[(j + 3) % 4], L[j]) || P[j]);
+  // a bank card has rounded corners (r = 3.18 mm ≈ 3.7 % of its width): the outline cuts each corner by ~1.5 % of the width.
+  // posters, screens, boxes have sharp corners → not a card
+  const wC = Math.hypot(R[1][0] - R[0][0], R[1][1] - R[0][1]) + Math.hypot(R[2][0] - R[1][0], R[2][1] - R[1][1]);
+  const gaps = R.map(q => { let d = 1e9; for (const p of best.pts) d = Math.min(d, Math.hypot(p[0] - q[0], p[1] - q[1])); return d / (wC / 2.586 * 1.586 / 1); });
+  const rounded = gaps.filter(gp => gp > 0.0055 && gp < 0.05).length;
+  if (typeof window !== 'undefined') window.__cardGaps = gaps;
+  if (rounded < 3 && !(typeof window !== "undefined" && window.__noRound)) return null;
   if (R.some((p, j) => Math.hypot(p[0] - P[j][0], p[1] - P[j][1]) > 0.15 * Math.sqrt(best.area))) return P.map(p => [p[0] / k, p[1] / k]);
   return R.map(p => [p[0] / k, p[1] / k]);
 }
