@@ -1,9 +1,10 @@
-/* On-device lens segmentation (SlimSAM, Segment Anything distilled) — runs offline in the browser.
+/* On-device lens segmentation (SAM ViT-B on GPU/CPU, SlimSAM fallback) — runs offline in the browser.
    Everything (runtime + model, ~35 MB) is served from this site and cached after the first load.
    segmentLens(canvas, box, points) → closed outline of the lens opening in image pixels, or null. */
 let T = null, model = null, processor = null, loading = null, embCache = { cv:null, emb:null, inp:null };
 const base = new URL('..', import.meta.url).href;
 
+export let modelName = '';
 export function aiReady(){ return !!model; }
 export async function loadAI(onProgress){
   if (model) return true;
@@ -13,9 +14,25 @@ export async function loadAI(onProgress){
     T.env.localModelPath = base + 'models/';
     T.env.backends.onnx.wasm.wasmPaths = base + 'ai/';
     T.env.backends.onnx.wasm.numThreads = (self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1);
-    const opt = { dtype:'q8', progress_callback:p => { if (onProgress && p.status === 'progress' && p.total) onProgress(p.loaded / p.total); } };
-    model = await T.SamModel.from_pretrained('Xenova/slimsam-77-uniform', opt);
-    processor = await T.AutoProcessor.from_pretrained('Xenova/slimsam-77-uniform');
+    // files over GitHub's 100 MB limit are stored in parts (models/split.json) → joined back here, each part cached by the SW
+    let split = {}; try{ split = await (await fetch(base + 'models/split.json')).json(); }catch(e){}
+    T.env.useCustomCache = true;
+    T.env.customCache = { put:async () => {}, match:async key => {
+      const u = typeof key === 'string' ? key : key.url, rel = Object.keys(split).find(k => u.endsWith(k)); if (!rel) return undefined;
+      const parts = []; for (let i = 0; i < split[rel]; i++){ const r = await fetch(base + 'models/' + rel + '.part' + i); if (!r.ok) throw new Error('model part ' + i); parts.push(await r.blob()); if (onProgress) onProgress((i + 1) / split[rel] * 0.95); }
+      const blob = new Blob(parts); return new Response(blob, { headers:{ 'content-length':String(blob.size) } }); } };
+    // best model this phone can run: SAM ViT-B on the GPU (fast, accurate) → SAM ViT-B on the CPU → SlimSAM (small, fallback)
+    let gpu = false; try{ const ad = navigator.gpu && await navigator.gpu.requestAdapter(); gpu = !!(ad && ad.features && ad.features.has('shader-f16')); }catch(e){}
+    const prog = p => { if (onProgress && p.status === 'progress' && p.total) onProgress(p.loaded / p.total); };
+    // on the CPU the big model only when it can use several threads (else ~30 s per photo) — the small one is ~3× faster
+    const many = self.crossOriginIsolated && (navigator.hardwareConcurrency || 2) >= 6;
+    const tries = self.__aiModel ? [self.__aiModel] : gpu ? ['gpu', 'base', 'slim'] : many ? ['base', 'slim'] : ['slim'];
+    for (const t of tries){
+      const id = t === 'slim' ? 'Xenova/slimsam-77-uniform' : 'Xenova/sam-vit-base', opt = t === 'gpu' ? { device:'webgpu', dtype:'fp16', progress_callback:prog } : { dtype:'q8', progress_callback:prog };
+      try{ model = await T.SamModel.from_pretrained(id, opt); processor = await T.AutoProcessor.from_pretrained(id); modelName = t; break; }
+      catch(e){ console.warn('AI model', t, 'failed', e); model = null; }
+    }
+    if (!model) throw new Error('no AI model');
     return true;
   })();
   try{ return await loading; }catch(e){ loading = null; throw e; }
