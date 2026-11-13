@@ -2466,7 +2466,13 @@ async function cardMeasure(file, pre){
     const am = await aiLoad($('shNote'));
     if (am && am.autoLenses){
       say('🧠 الذكاء بيدوّر على العدسات… 0%');
-      let r = null; try{ r = await am.autoLenses(sc, sPx, cb, p => say(`🧠 الذكاء بيدوّر على العدسات… ${Math.round(p * 100)}%`)); }catch(e){ console.error(e); }
+      let r = null, why = '';
+      const run = async () => { try{ r = await am.autoLenses(sc, sPx, cb, p => say(`🧠 الذكاء بيدوّر على العدسات… ${Math.round(p * 100)}%`)); why = ''; }catch(e){ console.error(e); r = null; why = String(e && e.message || e).slice(0, 60); } };
+      await run();
+      // on the phone's GPU it may fail where the CPU model works → try once more on the CPU
+      if ((!r || !r.lenses.length) && am.modelName === 'gpu'){ say('🧠 بجرّب تاني على المعالج…'); am.resetAI(); self.__aiModel = 'base'; try{ await aiLoad($('shNote')); await run(); }finally{ self.__aiModel = undefined; am.resetAI(); } }
+      const st = am.autoLenses.stat || {};
+      cardMeasure.why = why ? `خطأ: ${why}` : `فحصت ${st.pts || 0} نقطة، ${st.sized || 0} شكل بحجم عدسة، موديل ${st.model || '?'}`;
       if (r && r.lenses.length){
         // the lens on the right of the (front-view) photo, snapped to the edge on the sharp copy
         const pick = r.lenses.slice().sort((a, b) => b.cx - a.cx)[0];
@@ -2476,7 +2482,8 @@ async function cardMeasure(file, pre){
         if (ok){ if (r.lenses.length < 2) say(`📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم — 🧠 لقيت عدسة واحدة، فالبردج متقاسش`); return; }
       }
     }
-    say('ملقتش الفريم لوحده — المس داخل العدسة 👆 (المقاسات هتتحسب بالكارت)'); renderShapes(); aiTapMode(); return; }
+    const whyT = `⚠️ ملقتش العدسات لوحدي (${cardMeasure.why || 'الذكاء مش شغال'}) — المس داخل العدسة 👆 والمقاسات هتتحسب بالكارت`;
+    say(whyT); renderShapes(); aiTapMode(); const am2 = document.getElementById('atMsg'); if (am2) am2.textContent = whyT; return; }
   frames.sort((a, b) => (b.paired - a.paired) || (b.tr.quality - a.tr.quality));
   let pick = frames.length === 1 || (frames[0].paired && !frames[1].paired) ? 0 : await chooseFrame(frames);
   if (pick === null){ say('اتلغى الاختيار'); return; }
@@ -3502,7 +3509,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 83;
+const APP_V = 84;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');

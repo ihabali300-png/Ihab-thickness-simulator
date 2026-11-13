@@ -113,11 +113,12 @@ export async function autoLenses(cv, sPx, avoid, onProg){
   await loadAI();
   const { emb, inp } = await embed(cv);
   const [rh, rw] = inp.reshaped_input_sizes[0], W0 = cv.width, H0 = cv.height, step = 16 * sPx, cands = [];
+  autoLenses.stat = { pts:0, masks:0, sized:0, model:modelName };
   const pts = []; for (let y = step / 2; y < H0; y += step) for (let x = step / 2; x < W0; x += step){
     if (avoid && x > avoid.x0 - 5 * sPx && x < avoid.x1 + 5 * sPx && y > avoid.y0 - 5 * sPx && y < avoid.y1 + 5 * sPx) continue; pts.push([x, y]); }
   const inside = (c, x, y) => c.m && x >= c.bx0 && x <= c.bx1 && y >= c.by0 && y <= c.by1 && c.m[Math.floor((y - c.by0) / 2) * c.mw + Math.floor((x - c.bx0) / 2)];
   for (let i = 0; i < pts.length; i++){
-    if (onProg) onProg(i / pts.length);
+    if (onProg) onProg(i / pts.length); autoLenses.stat.pts++;
     const [px, py] = pts[i]; if (cands.some(c => inside(c, px, py))) continue;   // already inside a found lens
     const feeds = { ...emb, input_points:new T.Tensor('float32', [px / W0 * rw, py / H0 * rh], [1, 1, 1, 2]), input_labels:new T.Tensor('int64', [1n], [1, 1, 1]) };
     const out = await model(feeds);
@@ -128,6 +129,8 @@ export async function autoLenses(cv, sPx, avoid, onProg){
       for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (data[k * W * H + y * W + x]){ area++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
       if (!area) continue; area *= 4;
       const wm = (x1 - x0) / sPx, hm = (y1 - y0) / sPx, fill = area / Math.max(1, (x1 - x0) * (y1 - y0)), edge = x0 < 3 || y0 < 3 || x1 > W - 4 || y1 > H - 4;
+      if (self.__dbgL) self.__dbgL.push([Math.round(px), Math.round(py), k, +wm.toFixed(0), +hm.toFixed(0), +fill.toFixed(2), edge, +sc[k].toFixed(2)]);
+      autoLenses.stat.masks++; if (wm >= 25 && wm <= 90) autoLenses.stat.sized++;
       if (wm < 32 || wm > 72 || hm < 20 || hm > 62 || wm / hm < 0.85 || wm / hm > 2.4 || fill < 0.6 || fill > 0.96 || edge || sc[k] < 0.6) continue;
       if (avoid){ const ix = Math.max(0, Math.min(x1, avoid.x1) - Math.max(x0, avoid.x0)), iy = Math.max(0, Math.min(y1, avoid.y1) - Math.max(y0, avoid.y0)); if (ix * iy > 0.1 * (x1 - x0) * (y1 - y0)) continue; }
       // keep a low-res copy of the mask (to skip grid points inside it) and the outline (360 rays from its centre)
