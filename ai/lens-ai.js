@@ -6,6 +6,7 @@ const base = new URL('..', import.meta.url).href;
 
 export let modelName = '';
 export function aiReady(){ return !!model; }
+export function resetAI(){ model = null; processor = null; loading = null; modelName = ''; embCache = { cv:null, emb:null, inp:null }; }   // next loadAI() picks the model again
 export async function loadAI(onProgress){
   if (model) return true;
   if (!loading) loading = (async () => {
@@ -26,7 +27,9 @@ export async function loadAI(onProgress){
     const prog = p => { if (onProgress && p.status === 'progress' && p.total) onProgress(p.loaded / p.total); };
     // on the CPU the big model only when it can use several threads (else ~30 s per photo) — the small one is ~3× faster
     const many = self.crossOriginIsolated && (navigator.hardwareConcurrency || 2) >= 6;
-    const tries = self.__aiModel ? [self.__aiModel] : gpu ? ['gpu', 'base', 'slim'] : many ? ['base', 'slim'] : ['slim'];
+    let pref = 'auto'; try{ pref = localStorage.getItem('ihabAIModel') || 'auto'; }catch(e){}   // 🧠 user's choice: auto / strong / fast
+    const tries = self.__aiModel ? [self.__aiModel] : pref === 'fast' ? ['slim'] : pref === 'strong' ? (gpu ? ['gpu', 'base', 'slim'] : ['base', 'slim'])
+      : gpu ? ['gpu', 'base', 'slim'] : many ? ['base', 'slim'] : ['slim'];
     for (const t of tries){
       const id = t === 'slim' ? 'Xenova/slimsam-77-uniform' : 'Xenova/sam-vit-base', opt = t === 'gpu' ? { device:'webgpu', dtype:'fp16', progress_callback:prog } : { dtype:'q8', progress_callback:prog };
       try{ model = await T.SamModel.from_pretrained(id, opt); processor = await T.AutoProcessor.from_pretrained(id); modelName = t; break; }

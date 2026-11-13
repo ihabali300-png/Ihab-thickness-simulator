@@ -1282,6 +1282,7 @@ function renderShapes(){
   if (shTab === 'photo'){
     row = `<div class="sh-row sh-photo">
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
+      <button class="sh-edit" id="aiModelBtn" style="font-size:12px;padding:6px 12px;opacity:.9">${aiModelLabel()}</button>
       <button class="sh-edit" id="cardMeasure" style="border-color:#38bdf8;background:#082f49;color:#e0f2fe;font-size:14px;padding:9px 14px">📏 قياس دقيق بالكارت (الشكل + المقاسات)</button>
       ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس داخل العدسة فقط</button>` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
@@ -1302,6 +1303,7 @@ function renderShapes(){
   const rt = $('reTrace'); if (rt) rt.addEventListener('click', reTrace);
   const at = $('aiTap'); if (at) at.addEventListener('click', aiTapMode);
   const cm = $('cardMeasure'); if (cm) cm.addEventListener('click', cardGuide);
+  const amb = $('aiModelBtn'); if (amb) amb.addEventListener('click', aiModelCycle);
   ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
   $('shName').textContent = SHAPE_NAME[state.shape] || '';
 }
@@ -1919,12 +1921,24 @@ async function reTrace(opts = {}){
 /* 🧠 On-device AI (SlimSAM): the classic trace gives the prompt (points inside the lens, points on the rim) and a
    prior; the AI mask gives the exact lens opening. Loads once (~35 MB, then offline), falls back silently. */
 let aiMod = null, aiFailed = false;
+const AI_NAMES = { gpu:'قوي ⚡ كارت الشاشة (181 ميجا)', base:'قوي (102 ميجا)', slim:'سريع (14 ميجا)' };
+const aiPref = () => { try{ return localStorage.getItem('ihabAIModel') || 'auto'; }catch(e){ return 'auto'; } };
+function aiModelLabel(){ const p = aiPref(), on = aiMod && aiMod.modelName ? AI_NAMES[aiMod.modelName] : '';
+  return `🧠 الموديل: <b>${{ auto:'تلقائي', strong:'الأقوى', fast:'الأسرع' }[p]}</b>${on ? ` — شغال: ${on}` : ''}`; }
+/* tap: تلقائي → الأقوى (أدق، أبطأ على الموبايلات العادية) → الأسرع → … ; the next AI run loads the chosen one */
+function aiModelCycle(){
+  const nx = { auto:'strong', strong:'fast', fast:'auto' }[aiPref()]; try{ localStorage.setItem('ihabAIModel', nx); }catch(e){}
+  if (aiMod && aiMod.resetAI) aiMod.resetAI(); aiFailed = false;
+  const mb = $('aiModelBtn'); if (mb) mb.innerHTML = aiModelLabel();
+  const n = $('shNote'); if (n) n.textContent = { auto:'تم ✓ الموديل تلقائي: التطبيق بيختار الأنسب لموبايلك', strong:'تم ✓ الموديل الأقوى: أدق، بس ممكن ياخد 20–40 ثانية لو الموبايل مفيهوش كارت شاشة يدعمه', fast:'تم ✓ الموديل الأسرع: ثواني، ودقته أقل' }[nx];
+}
 async function aiLoad(note){
   if (aiFailed) return null;
   try{
     if (!aiMod) aiMod = await import('./ai/lens-ai.js');
     if (!aiMod.aiReady()){ if (note) note.textContent = '🧠 بحمّل الذكاء الاصطناعي (مرة واحدة)…';
       await aiMod.loadAI(p => { if (note) note.textContent = `🧠 بحمّل الذكاء الاصطناعي (مرة واحدة)… ${Math.round(p * 100)}%`; }); }
+    const mb = $('aiModelBtn'); if (mb) mb.innerHTML = aiModelLabel();
     return aiMod;
   }catch(e){ console.error(e); aiFailed = true; return null; }
 }
@@ -3418,7 +3432,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 78;
+const APP_V = 79;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
