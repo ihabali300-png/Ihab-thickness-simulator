@@ -2467,12 +2467,13 @@ async function cardMeasure(file, pre){
     if (am && am.autoLenses){
       say('🧠 الذكاء بيدوّر على العدسات… 0%');
       let r = null, why = '';
-      const run = async () => { try{ r = await am.autoLenses(sc, sPx, cb, p => say(`🧠 الذكاء بيدوّر على العدسات… ${Math.round(p * 100)}%`)); why = ''; }catch(e){ console.error(e); r = null; why = String(e && e.message || e).slice(0, 60); } };
+      const run = async () => { self.__aiStop = Date.now() + 40000;   // ⏱️ max 40 s per try, then whatever was found
+        try{ r = await am.autoLenses(sc, sPx, cb, p => say(`🧠 الذكاء بيدوّر على العدسات… ${Math.round(p * 100)}%`)); why = ''; }catch(e){ console.error(e); r = null; why = String(e && e.message || e).slice(0, 60); } };
       await run();
       // on the phone's GPU it may fail where the CPU model works → try once more on the CPU
-      if ((!r || !r.lenses.length) && am.modelName === 'gpu'){ say('🧠 بجرّب تاني على المعالج…'); am.resetAI(); self.__aiModel = 'base'; try{ await aiLoad($('shNote')); await run(); }finally{ self.__aiModel = undefined; am.resetAI(); } }
+      if ((!r || !r.lenses.length) && am.modelName !== 'slim'){ say('🧠 بجرّب تاني بالموديل السريع…'); am.resetAI(); self.__aiModel = 'slim'; try{ await aiLoad($('shNote')); await run(); }finally{ self.__aiModel = undefined; am.resetAI(); } }
       const st = am.autoLenses.stat || {};
-      cardMeasure.why = why ? `خطأ: ${why}` : `فحصت ${st.pts || 0} نقطة، ${st.sized || 0} شكل بحجم عدسة، موديل ${st.model || '?'}`;
+      cardMeasure.why = why ? `خطأ: ${why}` : `فحصت ${st.pts || 0} نقطة، ${st.masks || 0} شكل، ${st.sized || 0} بحجم عدسة، موديل ${st.model || '?'}${st.timeout ? '، الوقت خلص' : ''}`;
       if (r && r.lenses.length){
         // the lens on the right of the (front-view) photo, snapped to the edge on the sharp copy
         const pick = r.lenses.slice().sort((a, b) => b.cx - a.cx)[0];
@@ -3509,7 +3510,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 84;
+const APP_V = 85;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');

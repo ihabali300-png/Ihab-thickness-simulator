@@ -116,9 +116,11 @@ export async function autoLenses(cv, sPx, avoid, onProg){
   autoLenses.stat = { pts:0, masks:0, sized:0, model:modelName };
   const pts = []; for (let y = step / 2; y < H0; y += step) for (let x = step / 2; x < W0; x += step){
     if (avoid && x > avoid.x0 - 5 * sPx && x < avoid.x1 + 5 * sPx && y > avoid.y0 - 5 * sPx && y < avoid.y1 + 5 * sPx) continue; pts.push([x, y]); }
+  pts.sort((a, b) => Math.hypot(a[0] - W0 / 2, a[1] - H0 / 2) - Math.hypot(b[0] - W0 / 2, b[1] - H0 / 2));
   const inside = (c, x, y) => c.m && x >= c.bx0 && x <= c.bx1 && y >= c.by0 && y <= c.by1 && c.m[Math.floor((y - c.by0) / 2) * c.mw + Math.floor((x - c.bx0) / 2)];
   for (let i = 0; i < pts.length; i++){
     if (onProg) onProg(i / pts.length); autoLenses.stat.pts++;
+    if (self.__aiStop && Date.now() > self.__aiStop){ autoLenses.stat.timeout = true; break; }
     const [px, py] = pts[i]; if (cands.some(c => inside(c, px, py))) continue;   // already inside a found lens
     const feeds = { ...emb, input_points:new T.Tensor('float32', [px / W0 * rw, py / H0 * rh], [1, 1, 1, 2]), input_labels:new T.Tensor('int64', [1n], [1, 1, 1]) };
     const out = await model(feeds);
