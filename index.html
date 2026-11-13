@@ -1839,7 +1839,7 @@ function smoothOutline(P){
 }
 function useTrace(tr, note){
   setTimeout(armReminders, 0);
-  customPts = smoothOutline(tr.pts); customRim = tr.rim || null; customEP = tr.ep || null; state.shape = 'custom';
+  customPts = smoothOutline(tr.pts); customRim = tr.rim || null; window.__rim = customRim && customRim.map(v => v * state.A); customEP = tr.ep || null; state.shape = 'custom';
   if (tr.aspect > 0.9 && tr.aspect < 2.4) state.B = snap(state.A / tr.aspect, 0.5, 26, 50);
   syncUI(); requestRebuild(); renderShapes();
   $('shNote').textContent = note || `تم ✓ (وضوح الحافة ${Math.round(tr.quality * 100)}%)${tr.corners >= 4 ? ` — شكل بـ ${tr.corners} زوايا` : ''} — الخط الأخضر هو الشكل. ظبّط A و B بمقاس الذراع`;
@@ -1973,24 +1973,40 @@ function fillDents(P, maxD, n){
   return out.map((r, q) => { const t = t0 + dir * q / n * 2 * Math.PI; return [cx + Math.cos(t) * r, cy + Math.sin(t) * r]; });
 }
 
-/* 👃 the nose pad hides the lower nasal corner → the outline gets a straight chamfer there (convex, so fillDents can't see it).
-   Compare that corner with the lower temporal one (mirrored): if the nasal one is cut by > 0.8 mm, rebuild it like the
-   temporal one, at most maxD. nasalDir: −1 nasal side is −x, +1 it is +x. yDown: image coords (true) or y-up (false). */
-function fixPadCorner(P, maxD, nasalDir, yDown, mm){
-  const n = P.length; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; P.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
-  const xm = (x0 + x1) / 2, ym = (y0 + y1) / 2, M = P.map(([x, y]) => [2 * xm - x, y]);
-  const ray = (Q, t) => { const ux = Math.cos(t), uy = Math.sin(t); let best = 0;
-    for (let i = 0, j = Q.length - 1; i < Q.length; j = i++){ const ax = Q[j][0] - xm, ay = Q[j][1] - ym, ex = Q[i][0] - Q[j][0], ey = Q[i][1] - Q[j][1], den = ux * ey - uy * ex; if (Math.abs(den) < 1e-9) continue;
-      const sR = (ax * ey - ay * ex) / den, u = (ax * uy - ay * ux) / den; if (sR > 0 && u >= 0 && u <= 1 && sR > best) best = sR; } return best; };
-  let ar = 0; for (let i = 0; i < n; i++){ const a = P[i], b = P[(i + 1) % n]; ar += (a[0] - xm) * (b[1] - ym) - (b[0] - xm) * (a[1] - ym); }
-  const t0 = Math.atan2(P[0][1] - ym, P[0][0] - xm), dir = ar >= 0 ? 1 : -1, down = yDown ? 1 : -1;
-  const R = [], G = []; let worst = 0;
-  for (let i = 0; i < n; i++){ const t = t0 + dir * i / n * 2 * Math.PI, cx = Math.cos(t) * nasalDir, cy = Math.sin(t) * down, r = ray(P, t);
-    // weight: 1 in the middle of the lower-nasal quadrant, fading to 0 at the axes
-    const w = cx > 0 && cy > 0 ? Math.pow(Math.sin(2 * Math.atan2(cy, cx)), 2) : 0, g = w ? Math.max(0, ray(M, t) - r) * w : 0;
-    R.push(r); G.push(Math.min(maxD, g)); worst = Math.max(worst, g); }
-  if (worst < (mm || 1) * 0.8) return P;   // corners alike → leave the shape as it is
-  return R.map((r, i) => { const t = t0 + dir * i / n * 2 * Math.PI, q = r + G[i]; return [xm + Math.cos(t) * q, ym + Math.sin(t) * q]; });
+
+/* 🖼️ outer rim edge (needs the mm scale): from each inner-outline point walk outward until the colour is the
+   background's (sampled just around the frame) for ~1 mm → rim width there. Gaps (bridge, hinge, a temple) are filled
+   from the neighbours. Returns widths as a fraction of the lens width (what the 3D rim expects), or null. */
+function measureRim(src, P, sPx, lensW){
+  const n = P.length; let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= n; cy /= n;
+  const maxR = Math.max(...P.map(p => Math.hypot(p[0] - cx, p[1] - cy))) + 16 * sPx;
+  const bx = Math.max(0, Math.floor(cx - maxR)), by = Math.max(0, Math.floor(cy - maxR)), bw = Math.min(src.width, Math.ceil(cx + maxR)) - bx, bh = Math.min(src.height, Math.ceil(cy + maxR)) - by;
+  if (bw < 10 || bh < 10) return null;
+  const D = src.getContext('2d', { willReadFrequently:true }).getImageData(bx, by, bw, bh).data;
+  const px = (x, y) => { x = Math.round(x - bx); y = Math.round(y - by); if (x < 0 || y < 0 || x >= bw || y >= bh) return null; const i = (y * bw + x) * 4; return [D[i], D[i + 1], D[i + 2]]; };
+  const dirs = P.map(p => { const dx = p[0] - cx, dy = p[1] - cy, l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; });
+  // background: what's 13–16 mm outside the lens edge, most common colour (median per channel)
+  const bg = [[], [], []];
+  P.forEach((p, i) => { for (let m = 13; m <= 16; m += 1.5){ const c = px(p[0] + dirs[i][0] * m * sPx, p[1] + dirs[i][1] * m * sPx); if (c) for (let k = 0; k < 3; k++) bg[k].push(c[k]); } });
+  if (bg[0].length < 30) return null;
+  const B = bg.map(a => { a.sort((u, v) => u - v); return a[a.length >> 1]; });
+  const dist = c => Math.hypot(c[0] - B[0], c[1] - B[1], c[2] - B[2]);
+  // frame material right outside the lens edge (0.6–1.6 mm) tells how different the frame is from the background
+  const near = []; P.forEach((p, i) => { for (let m = 0.6; m <= 1.6; m += 0.5){ const c = px(p[0] + dirs[i][0] * m * sPx, p[1] + dirs[i][1] * m * sPx); if (c) near.push(dist(c)); } });
+  near.sort((u, v) => u - v); const fr = near[near.length >> 1] || 0;
+  if (fr < 22) return null;   // the frame looks like the background → can't see its outer edge
+  const T = fr * 0.45, step = 0.25 * sPx, need = Math.round(1 * sPx / step), out = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++){ let run = 0;
+    for (let m = 0.6 * sPx; m < 12 * sPx; m += step){ const c = px(P[i][0] + dirs[i][0] * m, P[i][1] + dirs[i][1] * m); if (!c) break;
+      if (dist(c) < T){ if (++run >= need){ out[i] = m - (need - 1) * step; break; } } else run = 0; } }
+  const ok = out.filter(v => !isNaN(v)); if (ok.length < n * 0.5) return null;
+  const sorted = ok.slice().sort((u, v) => u - v), med = sorted[sorted.length >> 1];
+  // fill gaps around the ring + keep it plausible (0.6–1.6× the median), then smooth
+  for (let i = 0; i < n; i++) if (isNaN(out[i]) || out[i] > med * 1.6 || out[i] < med * 0.6){ let a = 1; while (a < n && (isNaN(out[(i - a + n) % n]) || out[(i - a + n) % n] > med * 1.6 || out[(i - a + n) % n] < med * 0.6)) a++;
+    let b = 1; while (b < n && (isNaN(out[(i + b) % n]) || out[(i + b) % n] > med * 1.6 || out[(i + b) % n] < med * 0.6)) b++;
+    out[i] = a >= n ? med : (out[(i - a + n) % n] * b + out[(i + b) % n] * a) / (a + b); }
+  const sm = out.map((_, i) => { let t = 0; for (let k = -4; k <= 4; k++) t += out[(i + k + n) % n]; return t / 9; });
+  return sm.map(v => v / lensW);
 }
 function snapEdge(src, P, opt = {}){
   const N = 360, band = opt.band || 0.05;
@@ -2352,13 +2368,16 @@ async function aiTapMode(){
 function applyLensOutline(img, cv, P, sMM, dblMM, msgNoMM){
   const W = img.cv.width, H = img.cv.height, sx = W / cv.width, sy = H / cv.height;
   if (sMM) try{ P = fillDents(P, 4 * sMM, 360); let cx = 0; P.forEach(p => cx += p[0]); cx /= P.length;
-    P = fixPadCorner(P, 3 * sMM, cx > W / 2 ? -1 : 1, true, sMM); }catch(e){ console.error(e); }   // nose pads seen through the lens
+  }catch(e){ console.error(e); }   // nose pads seen through the lens
   let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; P.forEach(p => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
   const pw = (x1 - x0) * 0.12, ph = (y1 - y0) * 0.12, box = { x0:Math.max(0, (x0 - pw) / W), x1:Math.min(1, (x1 + pw) / W), y0:Math.max(0, (y0 - ph) / H), y1:Math.min(1, (y1 + ph) / H) };
   const mirror = (x0 + x1) / 2 / W < 0.45;   // a lens on the left of the photo is the left lens
   const tr = traceLens(img, box, { side:mirror ? -1 : 1 }), L = lastTrace;
   const pts = []; for (let a = 0; a < 180; a++){ const q = P[a * 2]; pts.push([q[0] - L.cx, L.cy - q[1]]); }
   const t2 = { ...tr, pts, quality:0.99, ai:true };
+  if (sMM) try{ const hi = trHi && Math.abs(trHi.width / trHi.height - W / H) < 0.02 ? trHi : img.cv, k = hi.width / W;
+    const rm = measureRim(hi, pts.map(([x, y]) => [(L.cx + x) * k, (L.cy - y) * k]), sMM * k, (x1 - x0) * k);
+    if (rm) tr.rim = rm; }catch(e){ console.error(e); }   // 🖼️ outer rim edge measured on the photo
   // preview
   const pc = document.createElement('canvas'), pad = 1.5, px = Math.max(0, L.cx - L.hw * pad), py = Math.max(0, L.cy - L.hh * pad);
   const sw = Math.min(W - px, L.hw * 2 * pad), sh = Math.min(H - py, L.hh * 2 * pad), sc = 300 / sw; pc.width = 300; pc.height = Math.round(sh * sc);
@@ -2513,7 +2532,10 @@ async function cardMeasure(file, pre){
   const f = frames[pick];
   say('🧠 بحدد الحافة بدقة…'); await tick();
   if (!await aiRefine(img, f, null)) try{ snapTrace(img, f, 0.06); }catch(e){ console.error(e); }
-  try{ f.tr = { ...f.tr, pts:fixPadCorner(fillDents(f.tr.pts, 4 * sPx), 3 * sPx, (f.box.x0 + f.box.x1) / 2 > 0.5 ? -1 : 1, false, sPx) }; }catch(e){ console.error(e); }   // nose pads seen through the lens
+  try{ f.tr = { ...f.tr, pts:fillDents(f.tr.pts, 4 * sPx) }; }catch(e){ console.error(e); }   // nose pads seen through the lens
+  try{ const L0 = f.last, k = R.canvas.width / W2, xs0 = f.tr.pts.map(p => p[0]);
+    const rm = measureRim(R.canvas, f.tr.pts.map(([x, y]) => [(L0.cx + x) * k, (L0.cy - y) * k]), sPx * k, (Math.max(...xs0) - Math.min(...xs0)) * k);
+    if (rm){ f.tr = { ...f.tr, rim:rm }; f.rim = f.mirror ? mirrorArr(rm) : rm; } }catch(e){ console.error(e); }   // 🖼️ outer rim edge
   f.pts = f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts;
   const xs = f.tr.pts.map(p => p[0]), ys = f.tr.pts.map(p => p[1]), wPx = Math.max(...xs) - Math.min(...xs), hPx = Math.max(...ys) - Math.min(...ys);
   const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL, A = wPx / sPx + bev, B = hPx / sPx + bev, D = f.bridge && f.bridge.dbl ? f.bridge.dbl * wPx / sPx - bev : null;
@@ -3531,7 +3553,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 86;
+const APP_V = 87;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
