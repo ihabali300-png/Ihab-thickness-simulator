@@ -10,17 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: download SlimSAM (offline lens segmentation)
+      - name: download SAM models (offline lens segmentation)
         run: |
           set -e
-          M=Xenova/slimsam-77-uniform; D=models/$M
-          mkdir -p $D/onnx
-          for f in config.json preprocessor_config.json onnx/vision_encoder_quantized.onnx onnx/prompt_encoder_mask_decoder_quantized.onnx; do
-            curl -fL --retry 3 -o $D/$f https://huggingface.co/$M/resolve/main/$f
+          for M in Xenova/slimsam-77-uniform Xenova/sam-vit-base; do
+            D=models/$M; mkdir -p $D/onnx
+            for f in config.json preprocessor_config.json onnx/vision_encoder_quantized.onnx onnx/prompt_encoder_mask_decoder_quantized.onnx; do
+              [ -s $D/$f ] || curl -fL --retry 3 -o $D/$f https://huggingface.co/$M/resolve/main/$f || echo "MISSING $M/$f"
+            done
           done
-          ls -la $D $D/onnx
+          ls -la models/*/*/onnx
+          # GitHub refuses files over 100 MB — report and drop anything too big
+          find models -size +95M -print -delete | sed 's/^/TOO BIG: /'
       - name: commit
         run: |
           git config user.name "github-actions"; git config user.email "actions@github.com"
-          git add models; git commit -m "Add SlimSAM model files" || echo nothing
+          git add -A models; git commit -m "Add SAM model files" || echo nothing
+          git pull --rebase -q || true
           git push
