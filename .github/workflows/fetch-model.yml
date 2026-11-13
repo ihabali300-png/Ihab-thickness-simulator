@@ -13,15 +13,22 @@ jobs:
       - name: download SAM models (offline lens segmentation)
         run: |
           set -e
-          for M in Xenova/slimsam-77-uniform Xenova/sam-vit-base; do
-            D=models/$M; mkdir -p $D/onnx
-            for f in config.json preprocessor_config.json onnx/vision_encoder_quantized.onnx onnx/prompt_encoder_mask_decoder_quantized.onnx; do
-              [ -s $D/$f ] || curl -fL --retry 3 -o $D/$f https://huggingface.co/$M/resolve/main/$f || echo "MISSING $M/$f"
-            done
+          get(){ M=$1; shift; D=models/$M; mkdir -p $D/onnx
+            for f in "$@"; do [ -s $D/$f ] || ls $D/$f.part0 >/dev/null 2>&1 || curl -fsL --retry 3 -o $D/$f https://huggingface.co/$M/resolve/main/$f || { echo "MISSING $M/$f"; rm -f $D/$f; }; done; }
+          get Xenova/slimsam-77-uniform config.json preprocessor_config.json onnx/vision_encoder_quantized.onnx onnx/prompt_encoder_mask_decoder_quantized.onnx
+          get Xenova/sam-vit-base config.json preprocessor_config.json onnx/vision_encoder_quantized.onnx onnx/prompt_encoder_mask_decoder_quantized.onnx onnx/vision_encoder_fp16.onnx onnx/prompt_encoder_mask_decoder_fp16.onnx
+          # GitHub refuses files over 100 MB -> split into 45 MB parts (the app joins them back)
+          for f in $(find models -name '*.onnx' -size +95M); do
+            split -b 45M -d -a 1 $f $f.part; rm $f; echo "SPLIT $f"
           done
-          ls -la models/*/*/onnx
-          # GitHub refuses files over 100 MB — report and drop anything too big
-          find models -size +95M -print -delete | sed 's/^/TOO BIG: /'
+          python3 - <<'PY'
+          import os, json, glob
+          m = {}
+          for p in glob.glob('models/**/*.part0', recursive=True):
+              base = p[:-6]; m[base[len('models/'):]] = len(glob.glob(base + '.part*'))
+          json.dump(m, open('models/split.json', 'w'), indent=1); print(m)
+          PY
+          ls -la models/*/*/onnx; du -sh models/*/*
       - name: commit
         run: |
           git config user.name "github-actions"; git config user.email "actions@github.com"
