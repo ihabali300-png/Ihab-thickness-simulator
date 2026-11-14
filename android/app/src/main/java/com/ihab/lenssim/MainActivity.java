@@ -9,6 +9,13 @@ import android.provider.MediaStore;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.webkit.PermissionRequest;
+import android.webkit.JavascriptInterface;
+import android.content.ContentValues;
+import android.os.Build;
+import android.os.Environment;
+import android.util.Base64;
+import java.io.OutputStream;
+import java.io.FileOutputStream;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -39,6 +46,27 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setUserAgentString(s.getUserAgentString() + " " + BuildConfig.UA_TAG);
+        // 💾 the page can save a photo into the phone's gallery (Pictures/LensForm), e.g. the measuring photos to upload to Drive
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface public String saveImage(String b64, String name) {
+                try {
+                    byte[] data = Base64.decode(b64, Base64.DEFAULT);
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        ContentValues v = new ContentValues();
+                        v.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+                        v.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                        v.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/LensForm");
+                        Uri u = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+                        if (u == null) return "fail";
+                        try (OutputStream o = getContentResolver().openOutputStream(u)) { o.write(data); }
+                    } else {
+                        File d = new File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "LensForm"); d.mkdirs();
+                        try (FileOutputStream o = new FileOutputStream(new File(d, name))) { o.write(data); }
+                    }
+                    return "ok";
+                } catch (Exception e) { return "fail: " + e.getMessage(); }
+            }
+        }, "IHAB");
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();

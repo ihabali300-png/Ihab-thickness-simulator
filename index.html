@@ -1276,7 +1276,7 @@ makeBtns($('frameBtns'), [['metal', 'Metal'], ['rimless', 'Rimless'], ['halfrim'
 // Colour swatches: small dots in rows (basic glossy / basic matte / clear / trendy) per frame family
 let swFamily = null;
 // Lens shape picker: tabs (regular / irregular) → icon row drawn from the SAME contour generator
-let shTab = null;
+let shTab = null, lastShot = null;   // lastShot: the last measuring photo (💾 save to gallery)
 function shapeIcon(id){
   const pts = makeContour(id, 15, 10.5, 1);
   return `<svg viewBox="-17 -12.5 34 25" width="34" height="25"><path d="${pts.map((p, i) => (i ? 'L' : 'M') + p.x.toFixed(2) + ' ' + (-p.y).toFixed(2)).join(' ')}Z"
@@ -1290,6 +1290,8 @@ function renderShapes(){
     row = `<div class="sh-row sh-photo">
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
       <button class="sh-edit" id="aiModelBtn" style="font-size:12px;padding:6px 12px;opacity:.9">${aiModelLabel()}</button>
+      <button class="sh-edit" id="smartCam" style="border-color:#a3e635;background:#1a2e05;color:#ecfccb;font-size:15px;padding:10px 16px;font-weight:800">📸 كاميرا ذكية — بتصوّر الورقة لوحدها</button>
+      ${lastShot ? `<button class="sh-edit" id="saveShot" style="font-size:12px;padding:6px 12px">💾 احفظ آخر صورة في الاستديو (عشان ترفعها على Drive)</button>` : ''}
       <button class="sh-edit" id="cardMeasure" style="border-color:#38bdf8;background:#082f49;color:#e0f2fe;font-size:14px;padding:9px 14px">📏 قياس دقيق — ورقة القياس أو كارت</button>
       ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس داخل العدسة فقط</button>` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
@@ -1310,6 +1312,8 @@ function renderShapes(){
   const rt = $('reTrace'); if (rt) rt.addEventListener('click', reTrace);
   const at = $('aiTap'); if (at) at.addEventListener('click', aiTapMode);
   const cm = $('cardMeasure'); if (cm) cm.addEventListener('click', cardGuide);
+  const sc = $('smartCam'); if (sc) sc.addEventListener('click', smartCam);
+  const ss = $('saveShot'); if (ss) ss.addEventListener('click', () => saveShot());
   const amb = $('aiModelBtn'); if (amb) amb.addEventListener('click', aiModelCycle);
   ['framePhoto', 'frameCam'].forEach(id => { const el = $(id); if (el) el.addEventListener('change', e => traceFrame(e.target.files[0])); });
   $('shName').textContent = SHAPE_NAME[state.shape] || '';
@@ -2484,6 +2488,7 @@ function confirmCard(cv0, C0){
 }
 let cardMod = null;
 async function cardMeasure(file, pre){
+  if (file) lastShot = file;
   setShTabPhoto();
   const note = $('shNote'), say = t => { if ($('shNote')) $('shNote').textContent = t; }, tick = () => new Promise(r => setTimeout(r, 30));
   say('📏 بجهز أداة القياس… (أول مرة بس محتاجة نت)'); await tick();
@@ -2576,9 +2581,96 @@ async function cardMeasure(file, pre){
   say(`📏 تم ✓ مقاس دقيق: A ${A.toFixed(1)} • B ${B.toFixed(1)}${D ? ` • DBL ${D.toFixed(1)}` : ''} مم${out} — لو الشكل محتاج تظبيط: 👆 أو ✏️`);
   window.__cardRes = { A, B, D, q:f.tr.quality };   // test hook
 }
+
+/* 📸 Smart camera: live view with an A4 guide and a level; it looks for the mat's 4 markers ~2×/s and takes the
+   photo by itself once ≥ 3 markers are seen and the phone is flat (a manual shutter is there too). Nothing is
+   saved anywhere until it is used as the measuring photo. */
+async function smartCam(){
+  const ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;direction:rtl;overflow:hidden;touch-action:none';
+  ov.innerHTML = `<video playsinline autoplay muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video><canvas style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
+    <div id="scMsg" style="position:absolute;top:10px;left:10px;right:10px;text-align:center;color:#ecfccb;font-size:15px;font-weight:700;background:#000a;border-radius:10px;padding:8px">📸 بفتح الكاميرا…</div>
+    <div style="position:absolute;bottom:14px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:18px">
+      <button id="scNo" style="padding:10px 16px;border-radius:12px;border:1px solid #a3e63566;background:#030a05cc;color:#ecfccb">إلغاء</button>
+      <button id="scShot" style="width:70px;height:70px;border-radius:50%;border:5px solid #ecfccb;background:#a3e635"></button>
+      <button id="scZoom" style="padding:10px 16px;border-radius:12px;border:1px solid #a3e63566;background:#030a05cc;color:#ecfccb;visibility:hidden">🔭 1x</button></div>`;
+  document.body.appendChild(ov);
+  const video = ov.querySelector('video'), cvs = ov.querySelector('canvas'), g = cvs.getContext('2d'), msg = ov.querySelector('#scMsg');
+  let stream = null, done = false, tilt = null, good = 0, timer = null, cv = null;
+  const onOri = e => { if (e.beta == null) return; tilt = Math.hypot(e.beta, e.gamma); };
+  const close = () => { done = true; clearTimeout(timer); window.removeEventListener('deviceorientation', onOri); if (stream) stream.getTracks().forEach(t => t.stop()); ov.remove(); };
+  ov.querySelector('#scNo').onclick = close;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' }, width:{ ideal:4032 }, height:{ ideal:3024 } }, audio:false });
+  }catch(e){
+    console.error(e); close();
+    const n = $('shNote'); if (n) n.textContent = '⚠️ الكاميرا الذكية مفتحتش هنا — هفتحلك الكاميرا العادية';
+    const fc = $('frameCam'); if (fc) fc.click(); return;
+  }
+  video.srcObject = stream; await new Promise(r => video.onloadedmetadata = r); await video.play().catch(() => {});
+  // 🔭 a little zoom from farther away = less perspective, sharper lens edges (when the camera allows it)
+  const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (caps.zoom && caps.zoom.max >= 1.5){ const zb = ov.querySelector('#scZoom'), steps = [1, 2, 3].filter(z => z >= caps.zoom.min && z <= caps.zoom.max); let zi = 0;
+    zb.style.visibility = 'visible'; zb.onclick = async () => { zi = (zi + 1) % steps.length; try{ await track.applyConstraints({ advanced:[{ zoom:steps[zi] }] }); zb.textContent = `🔭 ${steps[zi]}x`; }catch(e){} }; }
+  window.addEventListener('deviceorientation', onOri);
+  const take = async why => {
+    if (done) return; done = true; clearTimeout(timer);
+    const c = document.createElement('canvas'); c.width = video.videoWidth; c.height = video.videoHeight; c.getContext('2d').drawImage(video, 0, 0);
+    msg.textContent = '📸 اتصوّرت ✓';
+    const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.95)), file = new File([blob], `lensform_${Date.now()}.jpg`, { type:'image/jpeg' });
+    close(); if (window.IHAB && IHAB.saveImage) saveShot(file, true); cardMeasure(file);
+  };
+  ov.querySelector('#scShot').onclick = () => take('manual');
+  // guide: A4 landscape box in the middle of what the camera shows
+  const drawGuide = (n, flat) => {
+    const r = cvs.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1); cvs.width = r.width * dpr; cvs.height = r.height * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const vw = video.videoWidth, vh = video.videoHeight, k = Math.min(r.width / vw, r.height / vh), sw = vw * k, sh = vh * k, ox = (r.width - sw) / 2, oy = (r.height - sh) / 2;
+    let gw = sw * 0.9, gh = gw * 210 / 297; if (gh > sh * 0.9){ gh = sh * 0.9; gw = gh * 297 / 210; }
+    const gx = ox + (sw - gw) / 2, gy = oy + (sh - gh) / 2, col = n >= 3 && flat ? '#a3e635' : n >= 2 ? '#fde047' : '#ffffffaa';
+    g.strokeStyle = col; g.lineWidth = 3; g.setLineDash(n >= 3 ? [] : [10, 8]); g.strokeRect(gx, gy, gw, gh); g.setLineDash([]);
+    for (const [x, y] of [[gx, gy], [gx + gw, gy], [gx + gw, gy + gh], [gx, gy + gh]]){ g.fillStyle = col; g.fillRect(x - 9, y - 9, 18, 18); }
+    // level bubble
+    const cx = r.width - 44, cy = 84; g.strokeStyle = '#ffffff99'; g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, 26, 0, 7); g.stroke(); g.beginPath(); g.arc(cx, cy, 6, 0, 7); g.stroke();
+    if (tilt != null){ const t = Math.min(26, tilt * 1.4); g.fillStyle = flat ? '#a3e635' : '#fb923c'; g.beginPath(); g.arc(cx + t * 0.7, cy - t * 0.7, 8, 0, 7); g.fill(); }
+  };
+  msg.textContent = '📄 بجهز قارئ الورقة…';
+  try{ cardMod = cardMod || await import('./ai/card-measure.js'); cv = await cardMod.loadCV(); }catch(e){ msg.textContent = '⚠️ قارئ الورقة مش متحمّل (محتاج نت أول مرة) — صوّر بالزرار'; }
+  const sm = document.createElement('canvas');
+  const tick = () => {
+    if (done) return;
+    let n = 0;
+    if (cv && video.videoWidth){
+      const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight)); sm.width = Math.round(video.videoWidth * k); sm.height = Math.round(video.videoHeight * k);
+      sm.getContext('2d').drawImage(video, 0, 0, sm.width, sm.height);
+      try{ const M = cardMod.findMat(cv, sm); n = M ? M.ids.length : 0; }catch(e){}
+    }
+    const flat = tilt == null || tilt < 7;
+    good = n >= 3 && flat ? good + 1 : 0;
+    drawGuide(n, flat);
+    msg.textContent = n >= 3 ? (flat ? `✓ شايف ${n} علامات — اثبت… ${good >= 2 ? '' : '📸'}` : `↔️ شايف ${n} علامات — خلّي الموبايل مستوي (ميل ${Math.round(tilt)}°)`)
+      : n === 2 ? '📄 شايف علامتين — بعّد شوية لحد ما الأربعة يبانوا' : '📄 خلّي ورقة القياس كلها جوّه الإطار — من فوق';
+    if (good >= 2) return take('auto');
+    timer = setTimeout(tick, 350);
+  };
+  tick();
+}
+
+/* 💾 keep the last measuring photo; save it to the phone's gallery (APK: Pictures/LensForm) so it can go to Drive → Mat */
+async function saveShot(file, quiet){
+  file = file || lastShot; if (!file) return false;
+  const name = file.name && /\.jpe?g$/i.test(file.name) ? file.name : `lensform_${Date.now()}.jpg`;
+  if (window.IHAB && IHAB.saveImage){
+    const b64 = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(file); });
+    const r = IHAB.saveImage(b64, name); if (!quiet) alertNote(r === 'ok' ? '💾 تم ✓ الصورة اتحفظت في الاستديو (فولدر LensForm) — ارفعها على Drive ← Mat' : '⚠️ الحفظ فشل: ' + r); return r === 'ok';
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  if (!quiet) alertNote('💾 تم ✓ الصورة اتنزّلت — لو مظهرتش، حدّث الـ APK للنسخة الجديدة'); return true;
+}
+function alertNote(t){ const n = $('shNote'); if (n) n.textContent = t; }
 function setShTabPhoto(){ if (shTab !== 'photo'){ shTab = 'photo'; renderShapes(); } }
 async function traceFrame(file){
   if (!file) return;
+  lastShot = file;
   const note = $('shNote');
   // 💳 a bank card in the photo → it's a measuring photo: go the card way (true shape + mm), whichever button took it
   try{
@@ -3582,7 +3674,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 92;
+const APP_V = 93;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
