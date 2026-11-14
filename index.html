@@ -2019,6 +2019,118 @@ function measureRim(src, P, sPx, lensW){
   const sm = out.map((_, i) => { let t = 0; for (let k = -4; k <= 4; k++) t += out[(i + k + n) % n]; return t / 9; });
   return sm.map(v => v / lensW);
 }
+
+/* 📄 On the mat we know each zone's place and colour → frame = whatever differs from the paper under it; the lens
+   openings = paper-coloured holes enclosed by the frame. Works for clear frames on black where edges are faint.
+   R: rectifyMat() result (page coords, s px/mm). Returns { lenses:[{pts (R.canvas px), rim:[mm…], cx, cy, w, h}], gapMM } or null. */
+let matTpl = null;   // the printed mat itself at 4 px/mm (grey) — subtracted so the ruler, text & zone edges vanish
+function loadMatTpl(){ return matTpl || (matTpl = new Promise((ok, no) => { const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = 1188; c.height = 840; const g = c.getContext('2d', { willReadFrequently:true }); g.drawImage(im, 0, 0, 1188, 840); const d = g.getImageData(0, 0, 1188, 840).data, t = new Uint8Array(1188 * 840); for (let i = 0; i < t.length; i++) t[i] = d[i * 4]; ok(t); }; im.onerror = no; im.src = 'ai/mat-tpl.png'; })); }
+async function matFind(R){
+  const q = 4, W = 297 * q, H = 210 * q, c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d', { willReadFrequently:true }); g.drawImage(R.canvas, 0, 0, W, H);
+  const D = g.getImageData(0, 0, W, H).data, N = W * H, tpl0 = await loadMatTpl();
+  if (self.__mfDbg) self.__mfRect = c.toDataURL('image/jpeg', 0.9);
+  const t = new Uint8Array(N); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) t[y * W + x] = tpl0[y * W + (R.mirror ? W - 1 - x : x)];
+  const zones = [[39, 37, 258, 104], [39, 108, 258, 175]];   // dark, light (mm)
+  const zoneOf = (x, y) => { const X = x / q, Y = y / q; for (let z = 0; z < 2; z++){ const [a, b, cc, d] = zones[z]; if (X > a && X < cc && Y > b && Y < d) return z + 1; } return 0; };
+  const Z = new Uint8Array(N), L = new Float32Array(N);
+  for (let i = 0; i < N; i++){ Z[i] = zoneOf(i % W, (i / W) | 0); L[i] = 0.3 * D[i * 4] + 0.59 * D[i * 4 + 1] + 0.11 * D[i * 4 + 2]; }
+  // how the print really looks in this photo, per zone: map template grey → photo brightness (paper & ink medians)
+  const med = a => { a.sort((u, v) => u - v); return a[a.length >> 1]; };
+  const map = [0, 1, 2].map(z => { const P = [], I = [], tp = [], ti = []; for (let i = 0; i < N; i += 3) if (Z[i] === z){ const isP = z === 1 ? t[i] < 128 : t[i] >= 128; (isP ? P : I).push(L[i]); (isP ? tp : ti).push(t[i]); }
+    const Lp = med(P) || 128, Li = I.length > 50 ? med(I) : Lp, Tp = med(tp) || 255, Ti = ti.length > 50 ? med(ti) : Tp; const b = Math.abs(Tp - Ti) > 20 ? (Lp - Li) / (Tp - Ti) : 0; return { a:Lp - b * Tp, b }; });
+  const Pr = new Float32Array(N); for (let i = 0; i < N; i++){ const m = map[Z[i]]; Pr[i] = m.a + m.b * t[i]; }
+  // allow ~0.75 mm misregistration: compare against the min/max expected brightness nearby
+  const filt = (A, r, mx) => { const B = new Float32Array(N), C = new Float32Array(N);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){ let v = A[y * W + x]; for (let d = -r; d <= r; d++){ const xx = x + d; if (xx < 0 || xx >= W) continue; const u = A[y * W + xx]; if (mx ? u > v : u < v) v = u; } B[y * W + x] = v; }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){ let v = B[y * W + x]; for (let d = -r; d <= r; d++){ const yy = y + d; if (yy < 0 || yy >= H) continue; const u = B[yy * W + x]; if (mx ? u > v : u < v) v = u; } C[y * W + x] = v; } return C; };
+  const Pmax = filt(Pr, 5, true), Pmin = filt(Pr, 5, false);
+  const Df = new Float32Array(N); for (let i = 0; i < N; i++) Df[i] = Math.max(0, L[i] - Pmax[i], Pmin[i] - L[i]);
+  // colour also counts (a grey frame on grey-ish paper still differs in hue)
+  const T = [0, 1, 2].map(z => { const d = []; for (let i = 0; i < N; i += 11) if (Z[i] === z) d.push(Df[i]); return Math.max(18, med(d) * 4 + 8); });
+  // hysteresis: clear strong frame pixels, then grow into fainter ones touching them (faint parts of a clear rim)
+  let M = new Uint8Array(N); { const st = []; for (let i = 0; i < N; i++) if (Df[i] > T[Z[i]]){ M[i] = 1; st.push(i); }
+    while (st.length){ const j = st.pop(), x = j % W; for (const n of [j - 1, j + 1, j - W, j + W, j - W - 1, j - W + 1, j + W - 1, j + W + 1]){ if (n < 0 || n >= N || M[n] || Math.abs((n % W) - x) > 1) continue; if (Df[n] > T[Z[n]] * 0.5){ M[n] = 1; st.push(n); } } } }
+  const bg = map.map(m => [m.a + m.b * 255]);
+  const morph = (A, r, dil) => { const B = new Uint8Array(N); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){ let v = dil ? 0 : 1;
+      for (let dy = -r; dy <= r && (dil ? !v : v); dy++) for (let dx = -r; dx <= r; dx++){ const xx = x + dx, yy = y + dy; const a = xx < 0 || yy < 0 || xx >= W || yy >= H ? 0 : A[yy * W + xx]; if (dil && a){ v = 1; break; } if (!dil && !a){ v = 0; break; } }
+      B[y * W + x] = v; } return B; };
+  // (no opening: the print is already subtracted, and a clear rim is often just two thin bright edge lines)
+  M = morph(morph(M, 2, true), 2, false);   // close small gaps in the rim
+  // drop small specks (reflections, dust) — keep big frame parts only
+  const lab = new Int32Array(N).fill(-1), stack = new Int32Array(N);
+  const label = (val, keep) => { let id = 0; const comps = [];
+    for (let i = 0; i < N; i++) if (M[i] === val && lab[i] < 0){ let sp = 0, n = 0, x0 = W, x1 = 0, y0 = H, y1 = 0, edge = false; stack[sp++] = i; lab[i] = id;
+      while (sp){ const j = stack[--sp], x = j % W, y = (j / W) | 0; n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (!x || !y || x === W - 1 || y === H - 1) edge = true;
+        for (const k of [j - 1, j + 1, j - W, j + W]) if (k >= 0 && k < N && Math.abs((k % W) - x) <= 1 && M[k] === val && lab[k] < 0){ lab[k] = id; stack[sp++] = k; } }
+      comps.push({ id, n, x0, x1, y0, y1, edge }); id++; } return comps; };
+  let comps = label(1); const small = new Set(comps.filter(cp => cp.n < 30 * q * q).map(cp => cp.id));
+  for (let i = 0; i < N; i++) if (M[i] && small.has(lab[i])) M[i] = 0;
+  if (self.__mfDbg){ const im = g.createImageData(W, H); for (let i = 0; i < N; i++){ const v = Math.min(255, Df[i] * 3); im.data[i*4] = v; im.data[i*4+1] = v; im.data[i*4+2] = M[i] ? 0 : v; im.data[i*4+3] = 255; } g.putImageData(im, 0, 0); self.__mfDbg = c.toDataURL('image/png'); self.__mfT = { T, bg }; }
+  lab.fill(-1); const holes = label(0).filter(h => !h.edge);
+  const k = R.s / q, inZone = (x, y) => Z[(y | 0) * W + (x | 0)] > 0;
+  const hit = (x, y) => { x = Math.round(x); y = Math.round(y); return x >= 0 && y >= 0 && x < W && y < H && M[y * W + x]; };
+  // outer rim edge along a ray: last frame pixel, jumping gaps ≤ 2.5 mm (a clear rim can show as two bright lines)
+  const rimWalk = (x, y, ux, uy) => { let last = 0, gap = 0; for (let e = 0; e < 10 * q; e += 0.5){ if (hit(x + ux * e, y + uy * e)){ last = e; gap = 0; } else if ((gap += 0.5) > 2.5 * q) break; } return last / q; };
+  const ring = (cx, cy) => { const n = 120, r = new Array(n).fill(NaN); let hits = 0;
+    for (let a = 0; a < n; a++){ const t = a / n * 2 * Math.PI, ux = Math.cos(t), uy = -Math.sin(t);
+      for (let e = 8 * q; e < 40 * q; e += 1) if (hit(cx + ux * e, cy + uy * e)){ r[a] = e; hits++; break; } }
+    const fill = () => { for (let a = 0; a < n; a++) if (isNaN(r[a])){ let b = 1, c = 1; while (b < n && isNaN(r[(a - b + n) % n])) b++; while (c < n && isNaN(r[(a + c) % n])) c++; if (b >= n) return false; r[a] = (r[(a - b + n) % n] * c + r[(a + c) % n] * b) / (b + c); } return true; };
+    if (hits < n * 0.4 || !fill()) return null;
+    // glare blobs inside the lens give too-short rays → drop & refill
+    const r0 = r.slice(); for (let a = 0; a < n; a++){ const w = []; for (let d = -8; d <= 8; d++) w.push(r0[(a + d + n) % n]); w.sort((u, v) => u - v); if (r0[a] < w[8] * 0.8) r[a] = NaN; } fill();
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (let a = 0; a < n; a++){ const t = a / n * 2 * Math.PI, x = cx + Math.cos(t) * r[a], y = cy - Math.sin(t) * r[a]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    return { r, hits:hits / n, x0, x1, y0, y1, cx, cy }; };
+  const toLens = (cx, cy, rad) => { const pts = [], rim = [];
+    for (let a = 0; a < 360; a++){ const t = a / 180 * Math.PI, ux = Math.cos(t), uy = -Math.sin(t), e = rad(a, ux, uy); pts.push([(cx + ux * e) * k, (cy + uy * e) * k]); rim.push(rimWalk(cx + ux * e, cy + uy * e, ux, uy)); }
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; pts.forEach(([x, y]) => { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
+    return { pts, rim, cx:cx * k, cy:cy * k, w:(x1 - x0) / R.s, h:(y1 - y0) / R.s, x0:x0 / R.s, x1:x1 / R.s, ymid:(y0 + y1) / 2 / R.s }; };
+  const pairUp = L => { let best = null; for (const a of L) for (const b of L){ if (a === b || a.x0 > b.x0) continue; const gap = b.x0 - a.x1;
+      if (gap < 6 || gap > 30 || Math.abs(a.ymid - b.ymid) > 8 || a.w / b.w < 0.85 || a.w / b.w > 1.18) continue; const sc = (a.sc || 1) + (b.sc || 1); if (!best || sc > best.sc) best = { a, b, sc, gap }; } return best; };
+  // smoothed difference map, sampled bilinearly
+  const G = new Uint8Array(N); for (let i = 0; i < N; i++) if (L[i] > 232) for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++){ const j = i + dy * W + dx; if (j >= 0 && j < N) G[j] = 1; }   // glare (saturated reflections) isn't frame
+  const S = new Float32Array(N); for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++){ let t2 = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const jj = (y + dy) * W + x + dx; t2 += G[jj] ? 0 : Math.min(Df[jj], 120); } S[y * W + x] = t2 / 9; }
+  const sam = (x, y) => { if (x < 0 || y < 0 || x >= W - 1 || y >= H - 1) return 0; const x0 = x | 0, y0 = y | 0, u = x - x0, v = y - y0, i0 = y0 * W + x0; return S[i0] * (1 - u) * (1 - v) + S[i0 + 1] * u * (1 - v) + S[i0 + W] * (1 - u) * v + S[i0 + W + 1] * u * v; };
+  // 🧭 inner rim edge around a centre = the smoothest closed path where "paper → frame" is strongest (DP over rays).
+  //    Glare blobs and leftover print are short → the path ignores them; gaps in a clear rim are bridged smoothly.
+  const ringDP = (cx, cy, n, dr) => { const r0 = 10 * q, J = Math.floor((38 - 10) * q / dr), d = 0.75 * q, m = Math.max(2, Math.round(2.2 * q / dr / (n / 180))), E = [];
+    for (let a = 0; a < n; a++){ const t = a / n * 2 * Math.PI, ux = Math.cos(t), uy = -Math.sin(t), e = new Float32Array(J);
+      for (let j2 = 0; j2 < J; j2++){ const r = r0 + j2 * dr; e[j2] = Math.max(0, sam(cx + ux * (r + d), cy + uy * (r + d)) - sam(cx + ux * (r - d), cy + uy * (r - d))) - 0.4 * (r - r0) / q; }   /* the first rim edge wins over a temple further out */ E.push(e); }
+    let prev = E[0].slice(); const back = [];
+    for (let a = 1; a < 2 * n; a++){ const e = E[a % n], cur = new Float32Array(J), bk = new Int16Array(J);
+      for (let j2 = 0; j2 < J; j2++){ let best = -1e9, bj = j2; for (let k2 = Math.max(0, j2 - m); k2 <= Math.min(J - 1, j2 + m); k2++){ const v = prev[k2] - Math.abs(k2 - j2) * 0.6; if (v > best){ best = v; bj = k2; } } cur[j2] = best + e[j2]; bk[j2] = bj; }
+      back.push(bk); prev = cur; }
+    let j2 = 0; for (let k2 = 1; k2 < J; k2++) if (prev[k2] > prev[j2]) j2 = k2;
+    const path = new Array(2 * n); path[2 * n - 1] = j2; for (let a = 2 * n - 1; a > 0; a--){ j2 = back[a - 1][j2]; path[a - 1] = j2; }
+    const r = [], hitsE = []; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, sc = 0;
+    for (let a = 0; a < n; a++){ const jj = path[n + a], rr = r0 + jj * dr, t = a / n * 2 * Math.PI, x = cx + Math.cos(t) * rr, y = cy - Math.sin(t) * rr; r.push(rr); const e = E[a][jj]; sc += Math.min(e + 0.4 * (rr - r0) / q, 40); hitsE.push(e + 0.4 * (rr - r0) / q);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const strong = hitsE.filter(e => e > 8).length / n;
+    return { r, sc:sc / n, strong, x0, x1, y0, y1, cx, cy }; };
+  const sizeOK = g => { const wm = (g.x1 - g.x0) / q, hm = (g.y1 - g.y0) / q; return wm > 30 && wm < 72 && hm > 18 && hm < 62 && wm / hm > 0.8 && wm / hm < 2.5; };
+  const cands = [];
+  for (let Y = 42; Y < 172; Y += 8) for (let X = 52; X < 246; X += 8){ const cx = X * q, cy = Y * q; if (!inZone(cx, cy) || hit(cx, cy)) continue;
+    const g = ringDP(cx, cy, 72, 2); if (g.strong > 0.5 && sizeOK(g)) cands.push(g); }
+  cands.sort((a, b) => b.sc - a.sc);
+  let lenses = [];
+  for (const c0 of cands.slice(0, 12)){ let cx = (c0.x0 + c0.x1) / 2, cy = (c0.y0 + c0.y1) / 2, g = null;
+    for (let it = 0; it < 3; it++){ g = ringDP(cx, cy, 120, 1); const nx = (g.x0 + g.x1) / 2, ny = (g.y0 + g.y1) / 2; if (Math.hypot(nx - cx, ny - cy) < 1.5) break; cx = nx; cy = ny; }
+    if (!g || g.strong < 0.55 || !sizeOK(g)) continue;
+    if (lenses.some(L => Math.hypot(L.g.cx - g.cx, L.g.cy - g.cy) < 8 * q)) continue;
+    const n = g.r.length, L = toLens(g.cx, g.cy, a => { const f = a / 360 * n, i0 = Math.floor(f) % n, i1 = (i0 + 1) % n, u = f - Math.floor(f); return g.r[i0] * (1 - u) + g.r[i1] * u; });
+    L.sc = g.sc * g.strong; L.g = g; lenses.push(L); }
+  const pair = pairUp(lenses);
+  if (self.__mfDbg) self.__mfPts = { s:R.s, all:lenses.map(L => L.pts.filter((_, i) => i % 6 === 0)), sc:lenses.map(L => [L.sc, L.g.strong, L.w, L.h]) };
+  const use = !lenses.length ? [] : pair ? [pair.a, pair.b] : [lenses.sort((u, v) => v.sc - u.sc)[0]];
+  // smooth the rim widths a bit and drop outliers
+  use.forEach(L => { const r = L.rim, n = r.length, s2 = r.slice().sort((u, v) => u - v), md = s2[n >> 1]; const c = r.map(v => Math.min(Math.max(v, md * 0.6), md * 1.6)); L.rim = c.map((_, i) => { let t = 0; for (let d = -5; d <= 5; d++) t += c[(i + d + n) % n]; return t / 11; }); });
+  const smoothRim = r => { const n = r.length, s2 = r.slice().sort((u, v) => u - v), md = s2[n >> 1]; const c = r.map(v => Math.min(Math.max(v, md * 0.6), md * 1.6)); return c.map((_, i) => { let t = 0; for (let d = -5; d <= 5; d++) t += c[(i + d + n) % n]; return t / 11; }); };
+  // outer rim (mm) for any lens outline given in R.canvas px
+  const rimFor = P => { let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length;
+    return smoothRim(P.map(([x, y]) => { const dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1; return rimWalk(x / k + dx / l * 2, y / k + dy / l * 2, dx / l, dy / l); })); };
+  if (!lenses.length) return { lenses:[], gapMM:0, rimFor };
+  return { lenses:use, gapMM:pair ? pair.gap : 0, rimFor };
+}
 function snapEdge(src, P, opt = {}){
   const N = 360, band = opt.band || 0.05;
   let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length;
@@ -2376,6 +2488,8 @@ async function aiTapMode(){
 
 /* apply one lens outline P (photo px, y down) as the frame shape: rim data from the tracer around it, preview,
    and — when the photo was straightened with the card (sMM px/mm) — A / B (and DBL) in mm */
+let matRim = null, matRimFor = null;   // matRimFor: { fn(pts in mat px) → rim mm, toR } while a mat photo is open
+   // rim widths (mm, per degree) found on the mat — used once by the next applyLensOutline
 function applyLensOutline(img, cv, P, sMM, dblMM, msgNoMM){
   const W = img.cv.width, H = img.cv.height, sx = W / cv.width, sy = H / cv.height;
   if (sMM) try{ P = fillDents(P, 4 * sMM, 360); let cx = 0; P.forEach(p => cx += p[0]); cx /= P.length;
@@ -2389,6 +2503,8 @@ function applyLensOutline(img, cv, P, sMM, dblMM, msgNoMM){
   if (sMM) try{ const hi = trHi && Math.abs(trHi.width / trHi.height - W / H) < 0.02 ? trHi : img.cv, k = hi.width / W;
     const rm = measureRim(hi, pts.map(([x, y]) => [(L.cx + x) * k, (L.cy - y) * k]), sMM * k, (x1 - x0) * k);
     if (rm) tr.rim = rm; }catch(e){ console.error(e); }   // 🖼️ outer rim edge measured on the photo
+  if (sMM && matRim){ const mw = (x1 - x0) / sMM; tr.rim = pts.map((_, i) => matRim[(i * 2) % 360] / mw); window.__rim = matRim; matRim = null; }
+  else if (sMM && matRimFor) try{ const mw = (x1 - x0) / sMM, rmm = matRimFor.fn(pts.map(([x, y]) => [(L.cx + x) * matRimFor.toR, (L.cy - y) * matRimFor.toR])); tr.rim = rmm.map(v => v / mw); window.__rim = rmm; }catch(e){ console.error(e); }   // 📄 the mat knows the paper → rim measured against it
   // preview
   const pc = document.createElement('canvas'), pad = 1.5, px = Math.max(0, L.cx - L.hw * pad), py = Math.max(0, L.cy - L.hh * pad);
   const sw = Math.min(W - px, L.hw * 2 * pad), sh = Math.min(H - py, L.hh * 2 * pad), sc = 300 / sw; pc.width = 300; pc.height = Math.round(sh * sc);
@@ -2488,6 +2604,7 @@ function confirmCard(cv0, C0){
 }
 let cardMod = null;
 async function cardMeasure(file, pre){
+  matRimFor = null;
   if (file) lastShot = file;
   setShTabPhoto();
   const note = $('shNote'), say = t => { if ($('shNote')) $('shNote').textContent = t; }, tick = () => new Promise(r => setTimeout(r, 30));
@@ -2527,9 +2644,25 @@ async function cardMeasure(file, pre){
     for (let y = Math.max(0, y0 - 20); y < Math.min(H2, y1 + 20); y += 3) for (let x = Math.max(0, x0 - 20); x < Math.min(W2, x1 + 20); x += 3) if (x < x0 || x > x1 || y < y0 || y > y1){ const i = (y * W2 + x) * 4; L.push([d[i], d[i + 1], d[i + 2], d[i] + d[i + 1] + d[i + 2]]); }
     L.sort((a, b) => b[3] - a[3]); const q = L[Math.floor(L.length * 0.3)] || [235, 235, 235]; g3.fillStyle = `rgb(${q[0]},${q[1]},${q[2]})`; g3.fillRect(x0, y0, x1 - x0, y1 - y0);
     return { cv:c2, ctx:g3, data:g3.getImageData(0, 0, W2, H2) }; })();
+  // 📄 mat: we know how the printed paper looks → frame = whatever differs from it (used for clear frames + the outer rim)
+  let mf = null;
+  if (R.mat){ try{ mf = await matFind(R); }catch(e){ console.error(e); window.__mfErr = String(e && e.stack || e); }
+    matRimFor = mf && mf.rimFor ? { fn:mf.rimFor, toR:R.canvas.width / W2 } : null;
+    window.__mf = mf ? { n:mf.lenses.length, gap:mf.gapMM, L:mf.lenses.map(l => [l.w, l.h, l.cx|0, l.cy|0]) } : 'null'; }
   let found = []; try{ found = findFrames(hidden).filter(f => !onCard(f)); if (!found.length) found = findFrames(img).filter(f => !onCard(f)); }catch(e){ console.error(e); }
   let frames = []; try{ frames = found.map(f => ({ ...f, pts:f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts, rim:f.mirror ? mirrorArr(f.tr.rim) : f.tr.rim })); }catch(e){ console.error(e); }
   lastPhoto = { img, c:[0.5, 0.5], s:sPx }; aiLoad(null);
+  // trust the mat finder only when both lenses look like a real pair (clear frames can fool it → the user taps instead)
+  const mfOK = mf && mf.lenses.length === 2 && mf.lenses.every(l => l.w > 37 && l.w < 62 && l.h > 22 && l.h < 55 && (!l.g || l.g.strong > 0.85)) && Math.abs(mf.lenses[0].w - mf.lenses[1].w) < 3 && Math.abs(mf.lenses[0].h - mf.lenses[1].h) < 3;
+  if (!frames.length && mfOK){
+{
+      const pick = mf.lenses.slice().sort((a, b) => b.cx - a.cx)[0], k2 = W2 / R.canvas.width;
+      let P = pick.pts; matRim = pick.rim;
+      lastPhoto = { img, c:[pick.cx * k2 / W2, pick.cy * k2 / H2], s:sPx };
+      const ok = applyLensOutline(img, sc, P.map(([x, y]) => [x * k2, y * k2]), sPx, mf.lenses.length > 1 ? mf.gapMM : null, '');
+      if (ok){ window.__cardRes = { A:state.A, B:state.B, D:mf.lenses.length > 1 ? state.DBL : null, via:'mat' }; if (mf.lenses.length < 2) say(`📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم — لقيت عدسة واحدة، فالبردج متقاسش`); return; }
+    }
+  }
   if (!frames.length){
     // 🧠 the classic tracer missed it → the AI looks for the lenses by itself: we know the mm scale, so only lens-sized regions count
     const am = await aiLoad($('shNote'));
@@ -2543,6 +2676,9 @@ async function cardMeasure(file, pre){
       if ((!r || !r.lenses.length) && am.modelName !== 'slim'){ say('🧠 بجرّب تاني بالموديل السريع…'); am.resetAI(); self.__aiModel = 'slim'; try{ await aiLoad($('shNote')); await run(); }finally{ self.__aiModel = undefined; am.resetAI(); } }
       const st = am.autoLenses.stat || {};
       cardMeasure.why = why ? `خطأ: ${why}` : `فحصت ${st.pts || 0} نقطة، ${st.masks || 0} شكل، ${st.sized || 0} بحجم عدسة، موديل ${st.model || '?'}${st.timeout ? '، الوقت خلص' : ''}`;
+      // on the mat a wrong AI guess is worse than asking: two lenses of the same size, lens-sized, or the user taps
+      if (r && R.mat){ const ws = r.lenses.map(l => { const xs = l.pts.map(p => p[0]); return (Math.max(...xs) - Math.min(...xs)) / sPx; });
+        window.__aiWs = ws; if (r.lenses.length !== 2 || ws.some(w => w < 36 || w > 60) || Math.abs(ws[0] - ws[1]) > 4.5){ r = null; cardMeasure.why = 'الفريم مش واضح كفاية على الورقة (غالبًا شفاف)'; } }
       if (r && r.lenses.length){
         // the lens on the right of the (front-view) photo, snapped to the edge on the sharp copy
         const pick = r.lenses.slice().sort((a, b) => b.cx - a.cx)[0];
@@ -2563,7 +2699,8 @@ async function cardMeasure(file, pre){
   if (!await aiRefine(img, f, null)) try{ snapTrace(img, f, 0.06); }catch(e){ console.error(e); }
   try{ f.tr = { ...f.tr, pts:fillDents(f.tr.pts, 4 * sPx) }; }catch(e){ console.error(e); }   // nose pads seen through the lens
   try{ const L0 = f.last, k = R.canvas.width / W2, xs0 = f.tr.pts.map(p => p[0]);
-    const rm = measureRim(R.canvas, f.tr.pts.map(([x, y]) => [(L0.cx + x) * k, (L0.cy - y) * k]), sPx * k, (Math.max(...xs0) - Math.min(...xs0)) * k);
+    const P0 = f.tr.pts.map(([x, y]) => [(L0.cx + x) * k, (L0.cy - y) * k]), lw = (Math.max(...xs0) - Math.min(...xs0)) * k;
+    const rm = mf && mf.rimFor ? mf.rimFor(P0).map(v => v * R.s / lw) : measureRim(R.canvas, P0, sPx * k, lw);
     if (rm){ f.tr = { ...f.tr, rim:rm }; f.rim = f.mirror ? mirrorArr(rm) : rm; } }catch(e){ console.error(e); }   // 🖼️ outer rim edge
   f.pts = f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts;
   const xs = f.tr.pts.map(p => p[0]), ys = f.tr.pts.map(p => p[1]), wPx = Math.max(...xs) - Math.min(...xs), hPx = Math.max(...ys) - Math.min(...ys);
@@ -3674,7 +3811,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 93;
+const APP_V = 94;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');

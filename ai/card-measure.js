@@ -215,5 +215,5 @@ export function rectifyMat(cv, canvas, M, opts = {}){
   if (opts.mirror !== false) cv.flip(dst, dst, 1);
   const out = document.createElement('canvas'); cv.imshow(out, dst);
   [sp, dp, Hm, src, dst].forEach(m => m.delete());
-  return { canvas:out, s, card:{ x0:-1e6, x1:-1e6 + 1, y0:-1e6, y1:-1e6 + 1 }, mat:true, err:err / s };   // err in mm
+  return { canvas:out, s, card:{ x0:-1e6, x1:-1e6 + 1, y0:-1e6, y1:-1e6 + 1 }, mat:true, mirror:opts.mirror !== false, err:err / s };   // err in mm
 }
