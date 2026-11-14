@@ -2023,15 +2023,15 @@ function measureRim(src, P, sPx, lensW){
 /* 📄 On the mat we know each zone's place and colour → frame = whatever differs from the paper under it; the lens
    openings = paper-coloured holes enclosed by the frame. Works for clear frames on black where edges are faint.
    R: rectifyMat() result (page coords, s px/mm). Returns { lenses:[{pts (R.canvas px), rim:[mm…], cx, cy, w, h}], gapMM } or null. */
-let matTpl = null;   // the printed mat itself at 4 px/mm (grey) — subtracted so the ruler, text & zone edges vanish
-function loadMatTpl(){ return matTpl || (matTpl = new Promise((ok, no) => { const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = 1188; c.height = 840; const g = c.getContext('2d', { willReadFrequently:true }); g.drawImage(im, 0, 0, 1188, 840); const d = g.getImageData(0, 0, 1188, 840).data, t = new Uint8Array(1188 * 840); for (let i = 0; i < t.length; i++) t[i] = d[i * 4]; ok(t); }; im.onerror = no; im.src = 'ai/mat-tpl.png'; })); }
+let matTpl = {};   // the printed mat itself at 4 px/mm (grey) — subtracted so the ruler, text & zone edges vanish
+function loadMatTpl(v){ return matTpl[v] || (matTpl[v] = new Promise((ok, no) => { const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = 1188; c.height = 840; const g = c.getContext('2d', { willReadFrequently:true }); g.drawImage(im, 0, 0, 1188, 840); const d = g.getImageData(0, 0, 1188, 840).data, t = new Uint8Array(1188 * 840); for (let i = 0; i < t.length; i++) t[i] = d[i * 4]; ok(t); }; im.onerror = no; im.src = v === 3 ? 'ai/mat-tpl-v3.png' : 'ai/mat-tpl.png'; })); }
 async function matFind(R){
   const q = 4, W = 297 * q, H = 210 * q, c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d', { willReadFrequently:true }); g.drawImage(R.canvas, 0, 0, W, H);
-  const D = g.getImageData(0, 0, W, H).data, N = W * H, tpl0 = await loadMatTpl();
+  const D = g.getImageData(0, 0, W, H).data, N = W * H, tpl0 = await loadMatTpl(R.ver || 2);
   if (self.__mfDbg) self.__mfRect = c.toDataURL('image/jpeg', 0.9);
   const t = new Uint8Array(N); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) t[y * W + x] = tpl0[y * W + (R.mirror ? W - 1 - x : x)];
-  const zones = [[39, 37, 258, 104], [39, 108, 258, 175]];   // dark, light (mm)
+  const v3 = R.ver === 3, zones = v3 ? [[27.5, 6.5, 269.5, 104.5], [27.5, 105.5, 269.5, 203.5]] : [[39, 37, 258, 104], [39, 108, 258, 175]];   // dark, light (mm)
   const zoneOf = (x, y) => { const X = x / q, Y = y / q; for (let z = 0; z < 2; z++){ const [a, b, cc, d] = zones[z]; if (X > a && X < cc && Y > b && Y < d) return z + 1; } return 0; };
   const Z = new Uint8Array(N), L = new Float32Array(N);
   for (let i = 0; i < N; i++){ Z[i] = zoneOf(i % W, (i / W) | 0); L[i] = 0.3 * D[i * 4] + 0.59 * D[i * 4 + 1] + 0.11 * D[i * 4 + 2]; }
@@ -2109,7 +2109,7 @@ async function matFind(R){
     return { r, sc:sc / n, strong, x0, x1, y0, y1, cx, cy }; };
   const sizeOK = g => { const wm = (g.x1 - g.x0) / q, hm = (g.y1 - g.y0) / q; return wm > 30 && wm < 72 && hm > 18 && hm < 62 && wm / hm > 0.8 && wm / hm < 2.5; };
   const cands = [];
-  for (let Y = 42; Y < 172; Y += 8) for (let X = 52; X < 246; X += 8){ const cx = X * q, cy = Y * q; if (!inZone(cx, cy) || hit(cx, cy)) continue;
+  for (let Y = v3 ? 16 : 42; Y < (v3 ? 196 : 172); Y += 8) for (let X = v3 ? 40 : 52; X < (v3 ? 258 : 246); X += 8){ const cx = X * q, cy = Y * q; if (!inZone(cx, cy) || hit(cx, cy)) continue;
     const g = ringDP(cx, cy, 72, 2); if (g.strong > 0.5 && sizeOK(g)) cands.push(g); }
   cands.sort((a, b) => b.sc - a.sc);
   let lenses = [];
@@ -3811,7 +3811,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 94;
+const APP_V = 95;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');

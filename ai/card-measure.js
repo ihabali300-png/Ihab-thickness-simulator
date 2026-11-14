@@ -140,8 +140,14 @@ export function rectify(cv, canvas, C, opts = {}){
    inner 4×4 bits = one of the 4 codes (in any rotation) → every found corner gives an image↔mm pair → homography. */
 const MAT = { page:[297, 210], ms:22, m:9, codes:{
   0:[[1,0,1,1],[0,1,0,1],[0,0,1,1],[0,0,1,0]], 1:[[0,0,0,0],[1,1,1,1],[1,0,0,1],[1,0,1,0]],
-  2:[[0,0,1,1],[0,0,1,1],[0,0,1,0],[1,1,0,1]], 3:[[1,0,0,1],[1,0,0,1],[0,1,0,0],[0,1,1,0]] } };
-MAT.pos = { 0:[MAT.m, MAT.m], 1:[MAT.page[0] - MAT.m - MAT.ms, MAT.m], 2:[MAT.page[0] - MAT.m - MAT.ms, MAT.page[1] - MAT.m - MAT.ms], 3:[MAT.m, MAT.page[1] - MAT.m - MAT.ms] };
+  2:[[0,0,1,1],[0,0,1,1],[0,0,1,0],[1,1,0,1]], 3:[[1,0,0,1],[1,0,0,1],[0,1,0,0],[0,1,1,0]],
+  // mat v3 (bigger zones, ruler on the edges only): ids 4–7, 18 mm, 6 mm from the page edge
+  4:[[0,1,0,1],[0,1,0,0],[1,0,0,1],[1,1,1,0]], 5:[[0,1,1,1],[1,0,0,1],[1,1,0,0],[1,1,0,1]],
+  6:[[1,0,0,1],[1,1,1,0],[0,0,1,0],[1,1,1,0]], 7:[[1,1,0,0],[0,1,0,0],[1,1,1,1],[0,0,1,0]] } };
+MAT.ver = id => id >= 4 ? 3 : 2;
+MAT.size = id => id >= 4 ? 18 : 22;
+{ const P = MAT.page, cornerPos = (j, ms, m) => [[m, m], [P[0] - m - ms, m], [P[0] - m - ms, P[1] - m - ms], [m, P[1] - m - ms]][j];
+  MAT.pos = {}; for (let id = 0; id < 8; id++) MAT.pos[id] = id >= 4 ? cornerPos(id - 4, 18, 6) : cornerPos(id, 22, 9); }
 const rotCW = g => g[0].map((_, c) => g.map(r => r[c]).reverse());
 const homog = (src, dst) => {   // 4-point homography (src→dst) as a 3×3 array
   const A = [], b = [];
@@ -182,11 +188,11 @@ export function findMat(cv, canvas){
             const border = [0, 1, 2, 3, 4, 5].every(t => cell[0][t] < thr && cell[5][t] < thr && cell[t][0] < thr && cell[t][5] < thr);
             if (border){
               const bits = [1, 2, 3, 4].map(r => [1, 2, 3, 4].map(q => cell[r][q] > thr ? 1 : 0));
-              for (const id of [0, 1, 2, 3]){ let code = MAT.codes[id];
+              for (let id = 0; id < 8; id++){ let code = MAT.codes[id];
                 for (let rot = 0; rot < 4; rot++){
                   if (code.every((row, r) => row.every((v, q) => v === bits[r][q]))){
                     // the marker's own TL corner sits at image corner `rot`
-                    const mm = MAT.pos[id], mc = [[mm[0], mm[1]], [mm[0] + MAT.ms, mm[1]], [mm[0] + MAT.ms, mm[1] + MAT.ms], [mm[0], mm[1] + MAT.ms]];
+                    const mm = MAT.pos[id], z = MAT.size(id), mc = [[mm[0], mm[1]], [mm[0] + z, mm[1]], [mm[0] + z, mm[1] + z], [mm[0], mm[1] + z]];
                     const pts = [0, 1, 2, 3].map(j => { const p = Q[(rot + j) % 4]; return [p[0] / k, p[1] / k, mc[j][0], mc[j][1]]; });
                     if (!found[id] || area > found[id].area) found[id] = { area, pts };
                   }
@@ -198,8 +204,10 @@ export function findMat(cv, canvas){
       }
     }
   } finally { [src, g, bin, cs, hi].forEach(m => m.delete()); }
-  const ids = Object.keys(found).map(Number); if (ids.length < 2) return null;
-  return { ids, pts:ids.flatMap(id => found[id].pts) };
+  // old (v2) or new (v3) sheet — whichever has more markers in the photo
+  const all = Object.keys(found).map(Number), n3 = all.filter(i => i >= 4).length, ver = n3 > all.length - n3 ? 3 : 2;
+  const ids = all.filter(i => MAT.ver(i) === ver); if (ids.length < 2) return null;
+  return { ids, ver, pts:ids.flatMap(id => found[id].pts) };
 }
 
 /* straighten the whole sheet to s px/mm (page coordinates, mirrored when the frame lies face-down) */
@@ -215,5 +223,5 @@ export function rectifyMat(cv, canvas, M, opts = {}){
   if (opts.mirror !== false) cv.flip(dst, dst, 1);
   const out = document.createElement('canvas'); cv.imshow(out, dst);
   [sp, dp, Hm, src, dst].forEach(m => m.delete());
-  return { canvas:out, s, card:{ x0:-1e6, x1:-1e6 + 1, y0:-1e6, y1:-1e6 + 1 }, mat:true, mirror:opts.mirror !== false, err:err / s };   // err in mm
+  return { canvas:out, s, card:{ x0:-1e6, x1:-1e6 + 1, y0:-1e6, y1:-1e6 + 1 }, mat:true, ver:M.ver || 2, mirror:opts.mirror !== false, err:err / s };   // err in mm
 }
