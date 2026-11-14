@@ -2146,7 +2146,27 @@ async function matFind(R){
   use.forEach(L => { L.rim = smoothRim(L.rim); });
 
   // outer rim (mm) for any lens outline given in R.canvas px
+  // 🧭 outer rim on the dark zone: a clear rim is faint & patchy, so per-ray walks wander (temple, reflections).
+  //    Instead: the smoothest closed path just outside the lens where "frame → paper" is strongest (DP), then widths.
+  let S2 = null; const sam2 = (x, y) => { if (!S2){ S2 = new Float32Array(N); for (let yy = 1; yy < H - 1; yy++) for (let xx = 1; xx < W - 1; xx++){ let t2 = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) t2 += Math.min(Df[(yy + dy) * W + xx + dx], 80); S2[yy * W + xx] = t2 / 9; } }
+    if (x < 0 || y < 0 || x >= W - 1 || y >= H - 1) return 0; const x0 = x | 0, y0 = y | 0, u = x - x0, v = y - y0, i0 = y0 * W + x0; return S2[i0] * (1 - u) * (1 - v) + S2[i0 + 1] * u * (1 - v) + S2[i0 + W] * (1 - u) * v + S2[i0 + W + 1] * u * v; };   // rim highlights count here (no glare removal)
+  const rimDP = (Pm, cx, cy) => { const n = Pm.length, J = Math.round(9 * q), j0 = Math.round(0.8 * q), d = 0.75 * q, E = [], U = [];
+    for (let i = 0; i < n; i++){ const [x, y] = Pm[i], dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l, e = new Float32Array(J);
+      for (let j = j0; j < J; j++){ const ex = x + ux * j, ey = y + uy * j; let a1 = 0, a2 = 0; for (let t = 1; t <= 6; t++){ a1 += sam2(ex - ux * t, ey - uy * t); a2 += sam2(ex + ux * (t + 1), ey + uy * (t + 1)) + sam2(ex + ux * (t + 6), ey + uy * (t + 6)); }
+        e[j] = Math.max(0, Math.min(a1 / 6, 25) - 3 * a2 / 12) - 0.12 * j / q; }   /* frame on the inside (1.5 mm), clean paper on the outside (3 mm) — so the bright inner bevel doesn't win */
+      E.push(e); U.push([ux, uy]); }
+    const m = Math.max(1, Math.round(1.2 * q * 360 / n / 2)); let prev = E[0].slice(); const back = [];
+    for (let a = 1; a < 2 * n; a++){ const e = E[a % n], cur = new Float32Array(J).fill(-1e9), bk = new Int16Array(J);
+      for (let j = j0; j < J; j++){ let best = -1e9, bj = j; for (let k2 = Math.max(j0, j - m); k2 <= Math.min(J - 1, j + m); k2++){ const v = prev[k2] - Math.abs(k2 - j) * 0.8; if (v > best){ best = v; bj = k2; } } cur[j] = best + e[j]; bk[j] = bj; }
+      back.push(bk); prev = cur; }
+    let j = j0; for (let k2 = j0; k2 < J; k2++) if (prev[k2] > prev[j]) j = k2;
+    const path = new Array(2 * n); path[2 * n - 1] = j; for (let a = 2 * n - 1; a > 0; a--){ j = back[a - 1][j]; path[a - 1] = j; }
+    const out = new Array(n); for (let i = 0; i < n; i++) out[i] = path[n + i] / q;
+    if (self.__mfDbg){ let ib = 0; U.forEach((u, i) => { if (u[1] > U[ib][1]) ib = i; }); self.__rimDbg = { n, ib, j:path[n + ib], e:Array.from(E[ib]).map(v => Math.round(v)), raw:Pm[ib].map(Math.round), c:[cx|0, cy|0], s1:Array.from({ length:40 }, (_, t) => Math.round(sam2(Pm[ib][0] + U[ib][0] * t, Pm[ib][1] + U[ib][1] * t))) }; }
+    return out; };
   const rimFor = P => { let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length;
+    const zc = Z[Math.round(cy / k) * W + Math.round(cx / k)];
+    if (zc === 1) return smoothRim(rimDP(P.map(([x, y]) => [x / k, y / k]), cx / k, cy / k));   // clear frame on black → one smooth outer edge
     return smoothRim(P.map(([x, y]) => { const dx = x - cx, dy = y - cy, l = Math.hypot(dx, dy) || 1; return rimWalk(x / k + dx / l * 2, y / k + dy / l * 2, dx / l, dy / l); })); };
   if (!lenses.length) return { lenses:[], gapMM:0, rimFor };
   return { lenses:use, gapMM:pair ? pair.gap : 0, rimFor };
@@ -3841,7 +3861,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 97;
+const APP_V = 98;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
