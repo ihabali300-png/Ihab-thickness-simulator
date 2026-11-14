@@ -253,11 +253,12 @@
     #hint{ display:none; }
     #legend{ right:5px; bottom:5px; font-size:9px; padding:3px 6px; flex-direction:row; gap:8px; }
     /* 3D view made tall with the 🔓 split handle: view buttons go down (thumb reach), just above the legend; the protrusion box goes up */
-    #viewport.tall .views{ top:auto; bottom:calc(var(--lgh, 26px) + 9px); }
+    /* tall view: what you read on top (protrusion left, legend right), what you tap in one bottom row (🔒 ⛶ then the views) */
     #viewport.tall #hud{ top:5px; bottom:auto; left:5px; }
-    /* small full-screen button in the button row (left end), small lock the height of the legend */
-    #viewport.tall #fsBtn{ top:auto; left:5px; bottom:calc(var(--lgh, 26px) + 9px); width:var(--tvbh, 26px); height:var(--tvbh, 26px); font-size:13px; }
-    #viewport.tall #splitLock{ bottom:5px; width:34px; height:var(--lgh, 26px); font-size:14px; border-radius:8px; padding:0; }
+    #viewport.tall #legend{ top:5px; bottom:auto; right:5px; }
+    #viewport.tall #splitLock{ left:5px; bottom:6px; transform:none; width:var(--tvbh, 26px); height:var(--tvbh, 26px); font-size:13px; border-radius:7px; padding:0; }
+    #viewport.tall #fsBtn{ top:auto; left:calc(11px + var(--tvbh, 26px)); bottom:6px; width:var(--tvbh, 26px); height:var(--tvbh, 26px); font-size:13px; }
+    #viewport.tall .views{ top:auto; bottom:6px; left:calc(17px + 2 * var(--tvbh, 26px)); right:5px; justify-content:space-between; }
     .sw-row{ justify-content:center; } .sw-row .lb{ width:auto; flex-basis:100%; text-align:center; }
     .sw-h{ text-align:center; } .chks{ justify-content:center; }
   }
@@ -3562,7 +3563,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 90;
+const APP_V = 91;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
