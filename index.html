@@ -2654,17 +2654,15 @@ async function cardMeasure(file, pre){
   lastPhoto = { img, c:[0.5, 0.5], s:sPx }; aiLoad(null);
   // trust the mat finder only when both lenses look like a real pair (clear frames can fool it → the user taps instead)
   const mfOK = mf && mf.lenses.length === 2 && mf.lenses.every(l => l.w > 37 && l.w < 62 && l.h > 22 && l.h < 55 && (!l.g || l.g.strong > 0.85)) && Math.abs(mf.lenses[0].w - mf.lenses[1].w) < 3 && Math.abs(mf.lenses[0].h - mf.lenses[1].h) < 3;
-  if (!frames.length && mfOK){
-{
+  const tryMF = () => {
+    if (!mfOK) return false;
       const pick = mf.lenses.slice().sort((a, b) => b.cx - a.cx)[0], k2 = W2 / R.canvas.width;
       let P = pick.pts; matRim = pick.rim;
       lastPhoto = { img, c:[pick.cx * k2 / W2, pick.cy * k2 / H2], s:sPx };
       const ok = applyLensOutline(img, sc, P.map(([x, y]) => [x * k2, y * k2]), sPx, mf.lenses.length > 1 ? mf.gapMM : null, '');
-      if (ok){ window.__cardRes = { A:state.A, B:state.B, D:mf.lenses.length > 1 ? state.DBL : null, via:'mat' }; if (mf.lenses.length < 2) say(`📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم — لقيت عدسة واحدة، فالبردج متقاسش`); return; }
-    }
-  }
-  if (!frames.length){
-    // 🧠 the classic tracer missed it → the AI looks for the lenses by itself: we know the mm scale, so only lens-sized regions count
+      if (ok){ window.__cardRes = { A:state.A, B:state.B, D:mf.lenses.length > 1 ? state.DBL : null, via:'mat' }; if (mf.lenses.length < 2) say(`📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم — لقيت عدسة واحدة، فالبردج متقاسش`); return true; }
+    return false; };
+  const tryAI = async () => {
     const am = await aiLoad($('shNote'));
     if (am && am.autoLenses){
       say('🧠 الذكاء بيدوّر على العدسات… 0%');
@@ -2684,12 +2682,22 @@ async function cardMeasure(file, pre){
         const pick = r.lenses.slice().sort((a, b) => b.cx - a.cx)[0];
         let P = pick.pts; try{ const k2 = R.canvas.width / W2; P = snapEdge(R.canvas, P.map(([x, y]) => [x * k2, y * k2]), { band:0.04 }).map(([x, y]) => [x / k2, y / k2]); }catch(e){}
         lastPhoto = { img, c:[pick.cx / W2, pick.cy / H2], s:sPx };
+        // the AI's mask already reaches into the rim groove → pull it in 0.5 mm so the bevel isn't counted twice
+        { let cx = 0, cy = 0; P.forEach(p => { cx += p[0]; cy += p[1]; }); cx /= P.length; cy /= P.length; const d = 0.5 * sPx;
+          P = P.map(([x, y]) => { const l = Math.hypot(x - cx, y - cy) || 1; return [x - (x - cx) / l * d, y - (y - cy) / l * d]; }); }
         const ok = applyLensOutline(img, sc, P, sPx, r.lenses.length > 1 ? r.gap / sPx : null, '');
-        if (ok){ if (r.lenses.length < 2) say(`📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم — 🧠 لقيت عدسة واحدة، فالبردج متقاسش`); return; }
+        if (ok){ window.__cardRes = { A:state.A, B:state.B, D:r.lenses.length > 1 ? state.DBL : null, via:'ai' }; if (r.lenses.length < 2) say(`📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم — 🧠 لقيت عدسة واحدة، فالبردج متقاسش`); return true; }
       }
     }
-    const whyT = `⚠️ ملقتش العدسات لوحدي (${cardMeasure.why || 'الذكاء مش شغال'}) — المس داخل العدسة 👆 والمقاسات هتتحسب بالكارت`;
-    say(whyT); renderShapes(); aiTapMode(); const am2 = document.getElementById('atMsg'); if (am2) am2.textContent = whyT; return; }
+    return false; };
+  const toTap = () => {
+    const whyT = `⚠️ ملقتش العدسات لوحدي (${cardMeasure.why || 'الذكاء مش شغال'}) — المس داخل العدسة 👆 والمقاسات هتتحسب ${R.mat ? "بالورقة" : "بالكارت"}`;
+    say(whyT); renderShapes(); aiTapMode(); const am2 = document.getElementById('atMsg'); if (am2) am2.textContent = whyT;
+  };
+  // 📄 on the mat a single lens from the classic tracer is not trusted first: AI → mat finder → (that single lens) → tap
+  let weak = null;
+  if (R.mat && frames.length && !frames.some(f => f.paired)){ weak = frames; frames = []; }
+  if (!frames.length){ if (await tryAI() || tryMF()) return; if (!weak){ toTap(); return; } frames = weak; }
   frames.sort((a, b) => (b.paired - a.paired) || (b.tr.quality - a.tr.quality));
   let pick = frames.length === 1 || (frames[0].paired && !frames[1].paired) ? 0 : await chooseFrame(frames);
   if (pick === null){ say('اتلغى الاختيار'); return; }
@@ -2705,6 +2713,8 @@ async function cardMeasure(file, pre){
   f.pts = f.mirror ? mirrorPts(f.tr.pts) : f.tr.pts;
   const xs = f.tr.pts.map(p => p[0]), ys = f.tr.pts.map(p => p[1]), wPx = Math.max(...xs) - Math.min(...xs), hPx = Math.max(...ys) - Math.min(...ys);
   const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL, A = wPx / sPx + bev, B = hPx / sPx + bev, D = f.bridge && f.bridge.dbl ? f.bridge.dbl * wPx / sPx - bev : null;
+  // 📄 an odd shape on the mat (too flat, odd bridge) → let the AI / mat finder try, else ask for a tap
+  if (R.mat && !weak && !(A > 36 && A < 62 && B > 24 && A / B < 1.9 && (!D || (D > 10 && D < 26)))){ if (await tryAI() || tryMF()) return; toTap(); return; }
   lastTrace = { ...f.last, mirror:!!f.mirror }; customPreview = f.tr.preview;
   lastPhoto = { img, c:[(f.box.x0 + f.box.x1) / 2, (f.box.y0 + f.box.y1) / 2], q:f.tr.quality, s:sPx };
   customBridge = f.bridge && f.bridge.top !== undefined ? f.bridge : null;
@@ -3811,7 +3821,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 95;
+const APP_V = 96;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
