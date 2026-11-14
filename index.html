@@ -252,6 +252,9 @@
     #hud .v{ font-size:13px; }
     #hint{ display:none; }
     #legend{ right:5px; bottom:5px; font-size:9px; padding:3px 6px; flex-direction:row; gap:8px; }
+    /* 3D view made tall with the 🔓 split handle: view buttons go down (thumb reach), just above the legend; the protrusion box goes up */
+    #viewport.tall .views{ top:auto; bottom:calc(max(var(--lgh, 26px), 40px) + 12px); }
+    #viewport.tall #hud{ top:5px; bottom:auto; left:38px; }
     .sw-row{ justify-content:center; } .sw-row .lb{ width:auto; flex-basis:100%; text-align:center; }
     .sw-h{ text-align:center; } .chks{ justify-content:center; }
   }
@@ -3297,7 +3300,9 @@ new ResizeObserver(resize).observe(viewport);
 /* 🔒 / 🔓 split handle (phones): unlocked → drag it up/down to give the 3D view or the controls more room; remembered */
 (() => {
   const btn = document.getElementById('splitLock'), pan = document.getElementById('panel'); if (!btn || !pan) return;
-  const set = v => { v = Math.max(25, Math.min(75, v)); viewport.style.height = v + '%'; pan.style.height = (100 - v) + '%'; try{ localStorage.setItem('ihabSplit', v); }catch(e){} };
+  const set = v => { v = Math.max(25, Math.min(75, v)); viewport.style.height = v + '%'; pan.style.height = (100 - v) + '%'; try{ localStorage.setItem('ihabSplit', v); }catch(e){}
+    viewport.classList.toggle('tall', v >= 55);
+    const lg = document.getElementById('legend'); if (lg) viewport.style.setProperty('--lgh', lg.getBoundingClientRect().height + 'px'); };
   try{ const v = +localStorage.getItem('ihabSplit'); if (v && innerWidth <= 820) set(v); }catch(e){}
   let open = false, drag = null;
   btn.addEventListener('pointerdown', e => { if (!open) return; e.preventDefault(); btn.setPointerCapture(e.pointerId); drag = { y:e.clientY, h:viewport.getBoundingClientRect().height, moved:false }; });
@@ -3553,7 +3558,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 88;
+const APP_V = 89;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
