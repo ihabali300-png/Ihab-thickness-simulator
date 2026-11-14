@@ -1,5 +1,5 @@
 /* IHAB Thickness app: network-first for the page (edits show on refresh), cache fallback for offline. */
-const CACHE = 'ihab-thk-v91';
+const CACHE = 'ihab-thk-v92';
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then(c => c.addAll(['./', 'index.html', 'card.html', 'manifest.json', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png']).catch(() => {}))); });
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== 'ihab-ai-v1').map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', e => {

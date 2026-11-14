@@ -134,3 +134,86 @@ export function rectify(cv, canvas, C, opts = {}){
   if (opts.mirror !== false){ const a = ow - card.x1, b = ow - card.x0; card.x0 = a; card.x1 = b; }
   return { canvas:out, s, card };
 }
+
+/* 📄 Measuring mat (ai/mat-spec.json): 4 ArUco 4x4 markers (ids 0–3, 22 mm) at known mm positions on an A4 sheet.
+   OpenCV.js here has no aruco module → own detector: dark convex quads → sample the 6×6 grid → black border +
+   inner 4×4 bits = one of the 4 codes (in any rotation) → every found corner gives an image↔mm pair → homography. */
+const MAT = { page:[297, 210], ms:22, m:9, codes:{
+  0:[[1,0,1,1],[0,1,0,1],[0,0,1,1],[0,0,1,0]], 1:[[0,0,0,0],[1,1,1,1],[1,0,0,1],[1,0,1,0]],
+  2:[[0,0,1,1],[0,0,1,1],[0,0,1,0],[1,1,0,1]], 3:[[1,0,0,1],[1,0,0,1],[0,1,0,0],[0,1,1,0]] } };
+MAT.pos = { 0:[MAT.m, MAT.m], 1:[MAT.page[0] - MAT.m - MAT.ms, MAT.m], 2:[MAT.page[0] - MAT.m - MAT.ms, MAT.page[1] - MAT.m - MAT.ms], 3:[MAT.m, MAT.page[1] - MAT.m - MAT.ms] };
+const rotCW = g => g[0].map((_, c) => g.map(r => r[c]).reverse());
+const homog = (src, dst) => {   // 4-point homography (src→dst) as a 3×3 array
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++){ const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u); A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v); }
+  for (let i = 0; i < 8; i++){ let p = i; for (let r = i + 1; r < 8; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+    [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]];
+    for (let r = 0; r < 8; r++) if (r !== i){ const f = A[r][i] / A[i][i]; for (let c = i; c < 8; c++) A[r][c] -= f * A[i][c]; b[r] -= f * b[i]; } }
+  const h = b.map((v, i) => v / A[i][i]); return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1]; };
+const apply = (H, x, y) => { const z = H[6] * x + H[7] * y + H[8]; return [(H[0] * x + H[1] * y + H[2]) / z, (H[3] * x + H[4] * y + H[5]) / z]; };
+
+/* → { pts:[[imgX,imgY,mmX,mmY]…], ids:[…] } in the canvas' pixels, or null (needs ≥ 2 markers) */
+export function findMat(cv, canvas){
+  const k = Math.min(1, 1600 / Math.max(canvas.width, canvas.height));
+  const sm = document.createElement('canvas'); sm.width = Math.round(canvas.width * k); sm.height = Math.round(canvas.height * k);
+  const sg = sm.getContext('2d', { willReadFrequently:true }); sg.drawImage(canvas, 0, 0, sm.width, sm.height);
+  const W = sm.width, H = sm.height, D = sg.getImageData(0, 0, W, H).data, G = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) G[i] = 0.3 * D[i * 4] + 0.59 * D[i * 4 + 1] + 0.11 * D[i * 4 + 2];
+  const at = (x, y) => { const xi = Math.max(0, Math.min(W - 1, Math.round(x))), yi = Math.max(0, Math.min(H - 1, Math.round(y))); return G[yi * W + xi]; };
+  const src = cv.imread(sm), g = new cv.Mat(), bin = new cv.Mat(), cs = new cv.MatVector(), hi = new cv.Mat(), found = {};
+  try{
+    cv.cvtColor(src, g, cv.COLOR_RGBA2GRAY);
+    for (const bs of [Math.round(W / 40) | 1, Math.round(W / 15) | 1]){
+      cv.adaptiveThreshold(g, bin, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, Math.max(11, bs), 7);
+      cv.findContours(bin, cs, hi, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+      for (let i = 0; i < cs.size(); i++){
+        const c = cs.get(i), area = cv.contourArea(c);
+        if (area < 250 || area > 0.06 * W * H){ c.delete(); continue; }
+        const ap = new cv.Mat(); cv.approxPolyDP(c, ap, 0.05 * cv.arcLength(c, true), true);
+        if (ap.rows === 4 && cv.isContourConvex(ap)){
+          const Q = order([0, 1, 2, 3].map(j => [ap.data32S[j * 2], ap.data32S[j * 2 + 1]]));
+          // read the 6×6 grid: canonical (0..6) → image
+          const Hc = homog([[0, 0], [6, 0], [6, 6], [0, 6]], Q), cell = [];
+          for (let r = 0; r < 6; r++){ const row = []; for (let q = 0; q < 6; q++){ let s = 0;
+            for (const dy of [0.3, 0.5, 0.7]) for (const dx of [0.3, 0.5, 0.7]){ const [x, y] = apply(Hc, q + dx, r + dy); s += at(x, y); } row.push(s / 9); } cell.push(row); }
+          const flat = cell.flat(), lo = Math.min(...flat), hiV = Math.max(...flat), thr = (lo + hiV) / 2;
+          if (hiV - lo > 40){
+            const border = [0, 1, 2, 3, 4, 5].every(t => cell[0][t] < thr && cell[5][t] < thr && cell[t][0] < thr && cell[t][5] < thr);
+            if (border){
+              const bits = [1, 2, 3, 4].map(r => [1, 2, 3, 4].map(q => cell[r][q] > thr ? 1 : 0));
+              for (const id of [0, 1, 2, 3]){ let code = MAT.codes[id];
+                for (let rot = 0; rot < 4; rot++){
+                  if (code.every((row, r) => row.every((v, q) => v === bits[r][q]))){
+                    // the marker's own TL corner sits at image corner `rot`
+                    const mm = MAT.pos[id], mc = [[mm[0], mm[1]], [mm[0] + MAT.ms, mm[1]], [mm[0] + MAT.ms, mm[1] + MAT.ms], [mm[0], mm[1] + MAT.ms]];
+                    const pts = [0, 1, 2, 3].map(j => { const p = Q[(rot + j) % 4]; return [p[0] / k, p[1] / k, mc[j][0], mc[j][1]]; });
+                    if (!found[id] || area > found[id].area) found[id] = { area, pts };
+                  }
+                  code = rotCW(code);
+                } }
+            } }
+        }
+        ap.delete(); c.delete();
+      }
+    }
+  } finally { [src, g, bin, cs, hi].forEach(m => m.delete()); }
+  const ids = Object.keys(found).map(Number); if (ids.length < 2) return null;
+  return { ids, pts:ids.flatMap(id => found[id].pts) };
+}
+
+/* straighten the whole sheet to s px/mm (page coordinates, mirrored when the frame lies face-down) */
+export function rectifyMat(cv, canvas, M, opts = {}){
+  const s = Math.min(opts.maxPxMm || 8, (opts.maxSide || 2200) / MAT.page[0]), ow = Math.round(MAT.page[0] * s), oh = Math.round(MAT.page[1] * s);
+  const sp = cv.matFromArray(M.pts.length, 1, cv.CV_32FC2, M.pts.flatMap(p => [p[0], p[1]]));
+  const dp = cv.matFromArray(M.pts.length, 1, cv.CV_32FC2, M.pts.flatMap(p => [p[2] * s, p[3] * s]));
+  const Hm = cv.findHomography(sp, dp, 0);
+  // check: how far each corner lands from where it should (px) → quality
+  const h = Hm.data64F; let err = 0; M.pts.forEach(p => { const z = h[6] * p[0] + h[7] * p[1] + h[8], u = (h[0] * p[0] + h[1] * p[1] + h[2]) / z, v = (h[3] * p[0] + h[4] * p[1] + h[5]) / z; err = Math.max(err, Math.hypot(u - p[2] * s, v - p[3] * s)); });
+  const src = cv.imread(canvas), dst = new cv.Mat();
+  cv.warpPerspective(src, dst, Hm, new cv.Size(ow, oh), cv.INTER_LINEAR, cv.BORDER_CONSTANT, new cv.Scalar(128, 128, 128, 255));
+  if (opts.mirror !== false) cv.flip(dst, dst, 1);
+  const out = document.createElement('canvas'); cv.imshow(out, dst);
+  [sp, dp, Hm, src, dst].forEach(m => m.delete());
+  return { canvas:out, s, card:{ x0:-1e6, x1:-1e6 + 1, y0:-1e6, y1:-1e6 + 1 }, mat:true, err:err / s };   // err in mm
+}

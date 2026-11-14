@@ -1290,7 +1290,7 @@ function renderShapes(){
     row = `<div class="sh-row sh-photo">
       ${customPreview ? `<img class="sh-prev" src="${customPreview}" alt="">` : ''}
       <button class="sh-edit" id="aiModelBtn" style="font-size:12px;padding:6px 12px;opacity:.9">${aiModelLabel()}</button>
-      <button class="sh-edit" id="cardMeasure" style="border-color:#38bdf8;background:#082f49;color:#e0f2fe;font-size:14px;padding:9px 14px">📏 قياس دقيق بالكارت (الشكل + المقاسات)</button>
+      <button class="sh-edit" id="cardMeasure" style="border-color:#38bdf8;background:#082f49;color:#e0f2fe;font-size:14px;padding:9px 14px">📏 قياس دقيق — ورقة القياس أو كارت</button>
       ${lastPhoto ? `<button class="sh-edit" id="aiTap" style="border-color:#a3e635;background:#1a2e05">👆 المس داخل العدسة فقط</button>` : ''}
       ${lastTrace && customPts ? `<button class="sh-edit" id="editTrace">✏️ تعديل الشكل يدوي على الصورة</button>` : ''}
       ${lastPhoto && customPts ? `<button class="sh-edit" id="reTrace">🔄 إعادة القراءة</button>` : ''}
@@ -2397,10 +2397,10 @@ function applyLensOutline(img, cv, P, sMM, dblMM, msgNoMM){
   const aMM = sMM ? (x1 - x0) / sMM + (state.frame === 'rimless' ? 0 : CARD_BEVEL) : 0, okMM = aMM > 36 && aMM < 70;
   if (sMM && okMM){ lastPhoto.s = sMM; state.A = snap(aMM, 0.5, 44, 62); }
   useTrace({ ...t2, pts:mirror ? mirrorPts(pts) : pts, rim:mirror ? mirrorArr(tr.rim) : tr.rim }, sMM ? '' : msgNoMM);
-  if (sMM && okMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم`; }
+  if (sMM && okMM){ const bev = state.frame === 'rimless' ? 0 : CARD_BEVEL; state.B = snap((y1 - y0) / sMM + bev, 0.5, 26, 50); syncUI(); requestRebuild(); $('shNote').textContent = `📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم`; }
   else if (sMM) $('shNote').textContent = `⚠️ الشكل اتطبّق، بس المقاس طلع غلط (A ${aMM.toFixed(0)} مم) — غالباً الكارت اتحدد غلط`;
   if (sMM && okMM && dblMM && dblMM > 10 && dblMM < 26){ state.DBL = snap(dblMM - (state.frame === 'rimless' ? 0 : CARD_BEVEL), 0.5, 12, 24); syncUI(); requestRebuild();
-    $('shNote').textContent = `📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} • DBL ${state.DBL} مم`; }
+    $('shNote').textContent = `📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} • DBL ${state.DBL} مم`; }
   return okMM;
 }
 
@@ -2426,14 +2426,21 @@ function cardGuide(){
       <g transform="rotate(-4 190 150)"><rect x="160" y="128" width="86" height="54" rx="5" fill="#1e40af"/><rect x="170" y="146" width="12" height="10" rx="2" fill="#facc15"/></g>
       <text x="150" y="16" fill="#a3e635" font-size="11" text-anchor="middle">ورقة بيضا + الفريم مقلوب + كارت</text></svg>
     <div style="color:#ecfccb;font-size:14px;line-height:1.9;max-width:380px">
+      <b style="color:#fde047">📄 عندك ورقة القياس المطبوعة؟</b> حط الفريم مقلوب على المنطقة المناسبة (الشفاف على الأسود، الغامق على الأبيض) ونص البردج على الصفر، وصوّر من فوق والعلامات الأربعة باينين — مش محتاج كارت.<br>
+      <span style="color:#93c5fd">💳 مفيش ورقة؟ استعمل كارت:</span><br>
       1️⃣ حط ورقة بيضا على الترابيزة<br>2️⃣ اقلب الفريم على وشه نايم على الورقة (مش في إيدك)، والدراعات مفتوحة لفوق — كده بيبقى مستوي وB يطلع مظبوط (وشه لفوق بيميل على الدراعات فB يطلع أقل 1–2 مم)<br>3️⃣ حط أي كارت بمقاس كارت البنك جنبه على نفس السطح (مش فوق العدسات)<br>4️⃣ صوّر من فوق، والفريم والكارت باينين كاملين<br>
       <span style="color:#fde047">💡 مش لازم الصورة تبقى مستوية بالظبط — الكارت بيعدّل الميلان</span><br><span style="color:#93c5fd">🫥 الفريم شفاف؟ نوّر عليه كويس ومن غير ظل</span></div>
+    <div style="display:flex;gap:8px"><button class="cgF" data-d="1">⬇️ الفريم مقلوب على وشه</button><button class="cgF" data-d="0">⬆️ وشه لفوق</button></div>
+    <style>.cgF{padding:6px 12px;border-radius:9px;border:1px solid #38bdf866;background:#031018;color:#e0f2fe;font-size:13px}.cgF.on{background:#38bdf8;color:#04121c;font-weight:800}</style>
     <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
       <label class="sh-up" style="padding:10px 18px">📷 صوّر<input type="file" accept="image/*" capture="environment" id="cgCam"></label>
       <label class="sh-up alt" style="padding:10px 18px">🖼️ من الاستديو<input type="file" accept="image/*" id="cgFile"></label>
       <button id="cgNo" style="padding:9px 18px;border-radius:10px;border:1px solid #a3e63566;background:#030a05;color:#ecfccb">إلغاء</button></div>`;
   document.body.appendChild(ov);
   ov.querySelector('#cgNo').onclick = () => ov.remove();
+  let down = localStorage.getItem('ihabFaceDown') !== '0';
+  const fb = () => ov.querySelectorAll('.cgF').forEach(b => b.classList.toggle('on', (b.dataset.d === '1') === down)); fb();
+  ov.querySelectorAll('.cgF').forEach(b => b.onclick = () => { down = b.dataset.d === '1'; try{ localStorage.setItem('ihabFaceDown', down ? '1' : '0'); }catch(e){} fb(); });
   ['cgCam', 'cgFile'].forEach(id => ov.querySelector('#' + id).onchange = e => { const f = e.target.files[0]; ov.remove(); if (f) cardMeasure(f); });
 }
 /* show the photo with the card's 4 corners (found or a default) — drag to fix, with a magnifier */
@@ -2484,12 +2491,22 @@ async function cardMeasure(file, pre){
   try{ cardMod = cardMod || await import('./ai/card-measure.js'); cv = await cardMod.loadCV(); }
   catch(e){ console.error(e); say('⚠️ أداة القياس لسه متحملتش — افتح النت مرة وجرّب تاني'); return; }
   const raw = pre ? pre.raw : await loadImageData(file, 2400);
+  // 📄 the printed measuring mat first (4 markers, exact) — the bank card is the backup
+  let M = pre && pre.M || null;
+  if (!M && !(pre && pre.C)){ say('📄 بدور على ورقة القياس…'); await tick(); try{ M = cardMod.findMat(cv, raw.cv); }catch(e){ console.error(e); } }
+  let R;
+  if (M){
+    const down = localStorage.getItem('ihabFaceDown') !== '0';
+    say(`📄 لقيت ورقة القياس (${M.ids.length} علامات) — بعدّل ميلان الصورة…`); await tick();
+    R = cardMod.rectifyMat(cv, raw.cv, M, { maxSide:2200, mirror:down });
+  } else {
   say('💳 بدور على الكارت…'); await tick();
   let C = pre ? pre.C : null; if (!pre) try{ C = cardMod.findCard(cv, raw.cv); }catch(e){ console.error(e); }
   if (pre && C) C.auto = true;
   C = await confirmCard(raw.cv, C); if (C === 'none') return false; if (!C){ say('اتلغى القياس'); return true; }
   say('📐 بعدّل ميلان الصورة…'); await tick();
-  const R = cardMod.rectify(cv, raw.cv, C, { maxSide:2200, mirror:C.down !== false });   // face-down = seen from the back → mirror back to a front view
+  R = cardMod.rectify(cv, raw.cv, C, { maxSide:2200, mirror:C.down !== false });   // face-down = seen from the back → mirror back to a front view
+  }
   trHi = R.canvas;
   // detection runs on a ~1100 px copy (what the tracer is tuned for)
   const kk = Math.min(1, 1100 / Math.max(R.canvas.width, R.canvas.height)), sc = document.createElement('canvas'); sc.width = Math.round(R.canvas.width * kk); sc.height = Math.round(R.canvas.height * kk);
@@ -2527,7 +2544,7 @@ async function cardMeasure(file, pre){
         let P = pick.pts; try{ const k2 = R.canvas.width / W2; P = snapEdge(R.canvas, P.map(([x, y]) => [x * k2, y * k2]), { band:0.04 }).map(([x, y]) => [x / k2, y / k2]); }catch(e){}
         lastPhoto = { img, c:[pick.cx / W2, pick.cy / H2], s:sPx };
         const ok = applyLensOutline(img, sc, P, sPx, r.lenses.length > 1 ? r.gap / sPx : null, '');
-        if (ok){ if (r.lenses.length < 2) say(`📏 تم ✓ مقاس بالكارت: A ${state.A} • B ${state.B} مم — 🧠 لقيت عدسة واحدة، فالبردج متقاسش`); return; }
+        if (ok){ if (r.lenses.length < 2) say(`📏 تم ✓ مقاس دقيق: A ${state.A} • B ${state.B} مم — 🧠 لقيت عدسة واحدة، فالبردج متقاسش`); return; }
       }
     }
     const whyT = `⚠️ ملقتش العدسات لوحدي (${cardMeasure.why || 'الذكاء مش شغال'}) — المس داخل العدسة 👆 والمقاسات هتتحسب بالكارت`;
@@ -2556,7 +2573,7 @@ async function cardMeasure(file, pre){
   syncUI(); requestRebuild();
   if (!sane){ say(`⚠️ المقاس طلع غلط (A ${A.toFixed(0)} مم) — غالباً الكارت اتحدد غلط. صوّر تاني والكارت كله باين جنب الفريم، واتأكد إن النقط الأربعة على أركانه`); window.__cardRes = { A, B, D, bad:true }; return; }
   const out = A < 44 || A > 62 ? ' ⚠️ A برّه مدى البرنامج' : '';
-  say(`📏 تم ✓ مقاس بالكارت: A ${A.toFixed(1)} • B ${B.toFixed(1)}${D ? ` • DBL ${D.toFixed(1)}` : ''} مم${out} — لو الشكل محتاج تظبيط: 👆 أو ✏️`);
+  say(`📏 تم ✓ مقاس دقيق: A ${A.toFixed(1)} • B ${B.toFixed(1)}${D ? ` • DBL ${D.toFixed(1)}` : ''} مم${out} — لو الشكل محتاج تظبيط: 👆 أو ✏️`);
   window.__cardRes = { A, B, D, q:f.tr.quality };   // test hook
 }
 function setShTabPhoto(){ if (shTab !== 'photo'){ shTab = 'photo'; renderShapes(); } }
@@ -2567,7 +2584,9 @@ async function traceFrame(file){
   try{
     note.textContent = '🔎 بشوف الصورة…'; await new Promise(r => setTimeout(r, 30));
     cardMod = cardMod || await import('./ai/card-measure.js'); const cv = await cardMod.loadCV();
-    const raw = await loadImageData(file, 2400), C = cardMod.findCard(cv, raw.cv);
+    const raw = await loadImageData(file, 2400), M = cardMod.findMat(cv, raw.cv);
+    if (M){ note.textContent = '📄 لقيت ورقة القياس — هقيس بيها'; return cardMeasure(file, { raw, M }); }
+    const C = cardMod.findCard(cv, raw.cv);
     if (C){ note.textContent = '💳 لقيت كارت في الصورة — هقيس بيه'; if (await cardMeasure(file, { raw, C }) !== false) return; }   // 🚫 «مفيش كارت» → normal reading
   }catch(e){ console.warn('card check skipped', e); note.textContent = '⚠️ أداة قياس الكارت متحمّلتش (محتاجة نت أول مرة) — بقرا الصورة عادي…'; await new Promise(r => setTimeout(r, 1200)); }
   const sample = await samplePromise;
@@ -3563,7 +3582,7 @@ window.__sim = { parseRx, rebuild, get tr(){ return { trView, trHandles }; }, ge
 <div id="updCard"><div class="uh">🆕 الجديد في التحديث <b id="updVer"></b></div><ul id="updList"></ul><div class="ub"><button id="updNow">⟳ حدّث دلوقتي</button><button id="updLater">بعدين</button></div></div>
 <script>
 /* ⟳ Update: checks version.json; shows what's new; tap to wipe the offline copy and load the newest version */
-const APP_V = 91;
+const APP_V = 92;
 (() => {
   const $u = id => document.getElementById(id);
   const btn = $u('updBtn'), toast = $u('updToast'), card = $u('updCard');
